@@ -6,17 +6,13 @@
 
 [Features](#features) | [Installation](#installation) | [Configuration](#configuration) | [Troubleshooting](#troubleshooting) | [Security](#security) | [Development](#development) | [Support](#support)
 
-> **⚠️ Project Unmaintained — Security Notice**
+> **⚠️ Project Archived**
+> 
+> I'm grateful to all the users who have downloaded this plugin over the past year. Watching the Obsidian store install count climb to 87k has been fun! I never expected it to become the #1 MCP-related Obsidian plugin. 
 >
-> This project is no longer maintained. I stopped using Obsidian, so there is no personal motivation to keep this going.
->
-> More importantly: the architecture distributes a downloaded executable to users' machines. That model carries real risk today. AI tooling makes it trivially easy to submit pull requests — including malicious ones — and I do not have the bandwidth or the incentive to audit every contribution at the level this kind of project demands. The consequences of a supply chain attack landing on users are not a burden I'm willing to carry for a project that gives me zero ROI.
->
-> **Current release**: the binaries in the latest release were built directly from source via GitHub Actions and carry SLSA provenance attestations — they have not been tampered with. The risk described above is about future contributions, not the current artifacts.
->
-> **Current users**: migrate to a plugin that implements MCP over HTTP/SSE. That approach eliminates the need for local executables entirely.
->
-> **Future alternatives**: links to community-maintained alternatives will be added here once they clear the official Obsidian review process. If you have built or know of one, DM me on [Discord](https://discord.gg/q59pTrN9AA) with the merged plugin store PR and a link to the project repository.
+> This project was originally a labor of love for my partner, who was using Obsidian and wanted to chat with her notes. We're not using Obsidian currently, so I have decided to step aside to allow plugin developers who have a vested interest in the Obsidian ecosystem to gain users.
+> 
+> There are at least five alternatives published to the Obsidian Community Plugins store, with many more MCP-related beta plugins available through BRAT. I'm not going to make recommendations for a specific plugin; I'll leave that to the user's discretion.
 
 MCP Tools for Obsidian enables AI applications like Claude Desktop to securely access and work with your Obsidian vault through the Model Context Protocol (MCP). MCP is an open protocol that standardizes how AI applications can interact with external data sources and tools while maintaining security and user control. [^2]
 
