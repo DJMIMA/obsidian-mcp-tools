@@ -68,9 +68,11 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 
 ## 既知の問題と修正方針
 
-### サブディレクトリを含むパスで単一ファイル操作が全滅する
+### サブディレクトリを含むパスで単一ファイル操作が全滅する（修正済み 2026-09-03）
 
-症状: `get_vault_file` / `create_vault_file` / `append_to_vault_file` / `patch_vault_file` / `delete_vault_file` は vault ルート直下のファイルでは成功し、`/` を含むパス（`folder/note.md`）では失敗する。
+症状: `get_vault_file` / `create_vault_file` / `append_to_vault_file` / `patch_vault_file` / `delete_vault_file` は vault ルート直下のファイルでは成功し、`/` を含むパス（`folder/note.md`）では失敗していた。修正前のバイナリで `GET /vault/Daily%20log%2F... 404` を実機再現済み。
+
+修正: `packages/mcp-server/src/shared/encodeVaultPath.ts`（`/` で分割 → 各セグメントを `encodeURIComponent` → `/` で結合）を追加し、上記 5 ツール、`show_file_in_obsidian`、`list_vault_files`、`features/templates`、`features/prompts` のパス結合をすべてこれに置き換えた。`list_vault_files` は呼び出し側の末尾 `/` を落としてから 1 つ付け直す。単体テストは `encodeVaultPath.test.ts`。実機では後述の `bun run verify:paths` で 5 パターン × get/create/append/list/delete がすべて通ることを確認した（Local REST API 5.1.0）。
 
 原因（コードで確認済み）:
 
@@ -79,15 +81,9 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 自分の vault にインストールされている Local REST API のバージョンでの挙動は未確認。ただし上流の現行実装で確定的に失敗する構造なので、修正方針は変わらない。
 - `/open/*`（`show_file_in_obsidian`）は上流では残り全体を一括デコードするので現状でも通るが、セグメント単位エンコードでも同じ結果になる。統一してよい。
 
-修正方針: セグメント単位エンコード。
+### `patch_vault_file` / `patch_active_file` が Local REST API 5.x で 400 になる（未修正）
 
-```ts
-// 例: packages/mcp-server/src/shared/ に置き、makeRequest と同じ index.ts から export する
-export const encodeVaultPath = (p: string) =>
-  p.split("/").map(encodeURIComponent).join("/");
-```
-
-適用対象は上記 5 ツールと `show_file_in_obsidian`、および現在まったくエンコードしていない `list_vault_files` / `templates` / `prompts` のパス結合。`list_vault_files` は末尾の `/`（ディレクトリ指定）を保持すること。
+`verify:paths` の実行で判明。パスに関係なくルート直下でも失敗する。Local REST API 5.x は `Target-Type` / `Target` ヘッダによる PATCH 指定を「1.x 形式と 2.0 形式で曖昧」として扱い、`Markdown-Patch-Version` ヘッダで明示しないと `PatchHeaderTargetingRequiresExplicitVersion` を返す（上流 `requestHandler.ts` の `vaultPatch` 分岐、`constants.ts` のエラー文）。本リポジトリの 2 ツールは `Operation` / `Target-Type` / `Target` / `Target-Delimiter` / `Trim-Target-Whitespace` を送る 1.x 形式なので、最小の修正は両ツールのヘッダに `"Markdown-Patch-Version": "1"` を足すこと。`"2"` にすると Target の解釈が変わる（見出しは percent-encoded JSON 配列）ので、既存の引数スキーマのままなら `1` を選ぶ。
 
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
@@ -193,6 +189,14 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 | e | 3 階層以上のネスト | `a/b/c/note.md` |
 
 各パターンで最低限 `get_vault_file` → `create_vault_file`（または `append_to_vault_file`）→ `get_vault_file` で往復し、`list_vault_files` で親ディレクトリを列挙して見えることを確認する。エラーは `makeRequest` が `<METHOD> <path> <status>: <body>` の形で返すので、`<path>` にどうエンコードされたかがそのまま読める。
+
+この 5 パターンを自動で回すスクリプトがある：
+
+```bash
+cd packages/mcp-server && bun run build:windows && bun run verify:paths
+```
+
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。`patch` の行は前述の 5.x 非互換が直るまで FAIL する。
 
 ## バージョン整合
 

@@ -1,4 +1,4 @@
-import { makeRequest, type ToolRegistry } from "$/shared";
+import { encodeVaultPath, makeRequest, type ToolRegistry } from "$/shared";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { type } from "arktype";
 import { LocalRestAPI } from "shared";
@@ -162,7 +162,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
 
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/open/${encodeURIComponent(args.filename)}${query}`,
+        `/open/${encodeVaultPath(args.filename)}${query}`,
         {
           method: "POST",
         },
@@ -251,7 +251,10 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       "List files in the root directory or a specified subdirectory of your vault.",
     ),
     async ({ arguments: args }) => {
-      const path = args.directory ? `${args.directory}/` : "";
+      // Strip any trailing slash the caller passed, then add exactly one so
+      // Local REST API treats the path as a directory listing.
+      const directory = args.directory?.replace(/\/+$/, "");
+      const path = directory ? `${encodeVaultPath(directory)}/` : "";
       const data = await makeRequest(
         LocalRestAPI.ApiVaultFileResponse.or(
           LocalRestAPI.ApiVaultDirectoryResponse,
@@ -280,7 +283,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         : "text/markdown";
       const data = await makeRequest(
         isJson ? LocalRestAPI.ApiNoteJson : LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           headers: { Accept: format },
         },
@@ -309,7 +312,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "PUT",
           body: args.content,
@@ -333,7 +336,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "POST",
           body: args.content,
@@ -375,7 +378,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
 
       const response = await makeRequest(
         LocalRestAPI.ApiContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "PATCH",
           headers,
@@ -403,7 +406,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeURIComponent(args.filename)}`,
+        `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "DELETE",
         },

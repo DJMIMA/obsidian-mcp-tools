@@ -1,4 +1,5 @@
 import {
+  encodeVaultPath,
   formatMcpError,
   makeRequest,
   parseTemplateParameters,
@@ -22,7 +23,7 @@ export function registerTemplaterTools(tools: ToolRegistry) {
       // Get prompt content
       const data = await makeRequest(
         LocalRestAPI.ApiVaultFileResponse,
-        `/vault/${args.name}`,
+        `/vault/${encodeVaultPath(args.name)}`,
         {
           headers: { Accept: LocalRestAPI.MIME_TYPE_OLRAPI_NOTE_JSON },
         },

@@ -12,6 +12,7 @@
     "build:windows": "bun build --compile --minify --sourcemap --target=bun-windows-x64-baseline ./src/index.ts --outfile dist/mcp-server-windows",
     "check": "tsc --noEmit",
     "inspector": "npx @modelcontextprotocol/inspector bun src/index.ts",
+    "verify:paths": "bun scripts/verify-paths.ts",
     "release": "run-s build:*",
     "setup": "bun run ./scripts/install.ts",
     "test": "bun test ./src/**/*.test.ts"
