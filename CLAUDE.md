@@ -89,11 +89,26 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 対応: ヘッダ形式は捨て、**2.0 の JSON instruction body に移行した**（コミット履歴: まず `Markdown-Patch-Version: 1` で応急処置 → 2.0 へ）。
 
 - 変換は `packages/mcp-server/src/shared/buildPatchInstruction.ts`（単体テスト付き）。ツール引数 → `{ targetType, target, operation, scope?, within?, content | value, createTargetIfMissing?, rejectIfContentPreexists? }` を組み立て、`Content-Type: application/json` で `PATCH /vault/<path>` または `PATCH /active/` に送る。応答は 200 で本文がパッチ後の文書（`ApiContentResponse`）。
-- **ツール引数は後方互換**（`packages/shared/src/types/plugin-local-rest-api.ts` の `ApiPatchParameters`）。`target: "A::B"` + `targetDelimiter` は内部で配列に分割する。`contentType: application/json` は `JSON.parse` して `value` に載せる。frontmatter への文字列は常に `value`（上流の raw-content mode と同じ扱い）。`trimTargetWhitespace` は文字列 target の各セグメントを trim するだけ。`createTargetIfMissing` は従来どおり既定 true（`delete` と `within` 指定時を除く）。
+- **ツール引数は後方互換**（`packages/shared/src/types/plugin-local-rest-api.ts` の `ApiPatchParameters`）。`target: "A::B"` + `targetDelimiter` は内部で配列に分割する。`contentType: application/json` は `JSON.parse` して `value` に載せる。frontmatter への文字列は常に `value`（上流の raw-content mode と同じ扱い）。`trimTargetWhitespace` は文字列 target の各セグメントを trim するだけ。`createTargetIfMissing` は**既定 false**（2026-09-03 に変更。理由は次節）。
 - 追加した引数: `target` に配列、`operation: delete`、`scope`（content / marker / markerAndContent）、`within`、`createTargetIfMissing`、`rejectIfContentPreexists`。`content` は `delete` のとき不要になったので optional。見出しの移動（`scope: parent` + `destination`）と `ifMatch` は露出していない。
 - 2.0 の挙動差: 見出し配下への `append` / `prepend` は必ず新しいブロックになり、前後の空行はエンジンが管理する（`content` の先頭末尾の空行は無視される）。既存の段落やリストを続けたいときは `within` でブロックを指定する。`scope: marker` での見出しリネームは `#` を付けない（付けると見出し文字列の一部になる）。
 - 上流の `Markdown-Patch-Warnings` 応答ヘッダ（h6 超えなどの警告）は `makeRequest` がヘッダを返さないため拾っていない。
 - 2.0 の JSON body は Local REST API 5.x 前提。それより古い版との互換は捨てた（この fork の方針どおり）。
+
+### `patch_vault_file` / `patch_active_file` が H2 以下の見出しを解決できず、既定でファイル末尾に見出しを複製していた（修正済み 2026-09-03）
+
+症状: `target: "Plain"`（`## Plain`）や `"📝 本日の振り返り（事実）::AB"` のように**先頭の H1 を省いたパス**を渡すと 404 になり、既定の `createTargetIfMissing: true` によって `# Plain` のような新しい見出しツリーが EOF に追加されて「成功」と返っていた。実 vault のノートを壊した。
+
+原因（実機で確認済み）: markdown-patch 2.0 のエンジンは正しく任意の深さを解決する。`["Title", "Plain"]` や `Title::📝 本日の振り返り（事実）::個人/家族` は絵文字・全角括弧・`/` を含んでも通る。エンジンのバグではなく、**heading target は必ずトップレベルからの完全パス**という仕様で、`["Plain"]` は「`# Plain` という H1」の意味になる。存在しないので create にフォールバックしていた。
+
+対応:
+
+- `packages/mcp-server/src/shared/applyPatch.ts` が両 PATCH ツールの共通実装。heading target のときは先に document map（`GET /vault/<path>` または `GET /active/` に `Accept: application/vnd.olrapi.document-map+json`、レスポンス型は `LocalRestAPI.ApiDocumentMapResponse`）を取り、`resolveHeadingTarget.ts` の `resolveHeadingPath` で解決する。完全一致 → そのまま。部分パス（葉の見出しだけ、または末尾数段）が既存パスの**末尾に一意に一致** → 完全パスに広げて送る。複数一致 → `InvalidParams` で候補を列挙し**書き込まない**。一致なし → `createTargetIfMissing: true` のときだけ送る（与えたパスがトップレベルから作られる）。それ以外は既存見出し一覧を付けたエラーで**書き込まない**。
+- document map の `version` を instruction の `ifMatch` に載せるので、map 取得と PATCH の間にファイルが変わっていればエンジンが拒否する。
+- `createTargetIfMissing` の既定を false にした（`buildPatchInstruction.ts`）。frontmatter の新規キー作成も明示が必要になった。
+- 成功時のレスポンスに `Matched heading: A::B` / `Resolved heading X to A::B::X` / `Heading X does not exist; creating it` の 1 行を含める。呼び出し側はファイルを読み直さずに何に当たったか分かる。
+- 見出しテキストの照合は完全一致（大文字小文字・空白・絵文字を区別）。`trimTargetWhitespace` は送信前に各セグメントを trim するだけ。
+- 単体テストは `resolveHeadingTarget.test.ts`。実機は `verify:paths` の第 2 フェーズ（葉・部分・完全パス、`/`・絵文字・全角括弧を含む見出し、同名見出しの曖昧性、不在見出しの拒否と作成、`scope: markerAndContent` の H3 兄弟挿入、`patch_active_file` の葉解決）。
 
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
@@ -206,7 +221,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 5 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。2026-09-03 時点で 115/115 PASS。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズが続く（前節）。2026-09-03 時点で 145/145 PASS。
 
 ## バージョン整合
 

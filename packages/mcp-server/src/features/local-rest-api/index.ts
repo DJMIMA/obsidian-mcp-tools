@@ -1,5 +1,5 @@
 import {
-  buildPatchInstruction,
+  applyPatch,
   encodeVaultPath,
   makeRequest,
   type ToolRegistry,
@@ -99,26 +99,8 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     }).describe(
       "Insert, replace, or delete content in the currently-open note relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
     ),
-    async ({ arguments: args }) => {
-      // markdown-patch 2.0: the whole instruction travels as a JSON body.
-      const instruction = buildPatchInstruction(args);
-
-      const response = await makeRequest(
-        LocalRestAPI.ApiContentResponse,
-        "/active/",
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(instruction),
-        },
-      );
-      return {
-        content: [
-          { type: "text", text: "File patched successfully" },
-          { type: "text", text: response },
-        ],
-      };
-    },
+    async ({ arguments: args }) =>
+      applyPatch("/active/", "the active file", args),
   );
 
   // DELETE Active File
@@ -349,27 +331,12 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     }).describe(
       "Insert, replace, or delete content in a file relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
     ),
-    async ({ arguments: args }) => {
-      // markdown-patch 2.0: the whole instruction travels as a JSON body.
-      const instruction = buildPatchInstruction(args);
-
-      const response = await makeRequest(
-        LocalRestAPI.ApiContentResponse,
+    async ({ arguments: args }) =>
+      applyPatch(
         `/vault/${encodeVaultPath(args.filename)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(instruction),
-        },
-      );
-
-      return {
-        content: [
-          { type: "text", text: "File patched successfully" },
-          { type: "text", text: response },
-        ],
-      };
-    },
+        args.filename,
+        args,
+      ),
   );
 
   // DELETE Vault File Content
