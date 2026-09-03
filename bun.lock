@@ -102,7 +102,7 @@
 
     "@ark/util": ["@ark/util@0.30.0", "", {}, "sha512-mc6r0WlN+BAd8xhw6XnihkrHovekJb1fkUahtrFnlhb1sRnMl9hdFeJSEvJfcTM235eEin3lnq0TQYD+VCLXTw=="],
 
-    "@codemirror/language": ["@codemirror/language@github:lishid/cm-language#be84c19", { "dependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.23.0", "@lezer/common": "^1.1.0", "@lezer/highlight": "^1.0.0", "@lezer/lr": "^1.0.0", "style-mod": "^4.0.0" } }, "lishid-cm-language-be84c19"],
+    "@codemirror/language": ["@codemirror/language@github:lishid/cm-language#be84c19", { "dependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.23.0", "@lezer/common": "^1.1.0", "@lezer/highlight": "^1.0.0", "@lezer/lr": "^1.0.0", "style-mod": "^4.0.0" } }, "lishid-cm-language-be84c19", "sha512-G6QWbGuLU2YNz73HWreDkNbdnX/W2aq178VLw7yacSFP5Fp0KTJC1ffKEzNR4Om7djwR0n6VXSTdY2/UtsBIAw=="],
 
     "@codemirror/state": ["@codemirror/state@6.5.0", "", { "dependencies": { "@marijn/find-cluster-break": "^1.0.0" } }, "sha512-MwBHVK60IiIHDcoMet78lxt6iw5gJOGSbNbOIVBHWVXIH4/Nq1+GQgLLGgI1KlnN86WDXsPudVaqYHKBIx7Eyw=="],
 
@@ -1294,7 +1294,7 @@
 
     "obsidian-calendar-ui/tslib": ["tslib@2.1.0", "", {}, "sha512-hcVC3wYEziELGGmEEXue7D75zbwIIVUMWAVbHItGPx0ziyXxrOMQx4rQEVEV45Ut/1IotuEvwqPopzIOkDMf0A=="],
 
-    "obsidian-daily-notes-interface/obsidian": ["obsidian@github:obsidianmd/obsidian-api#23947b5", { "dependencies": { "@types/codemirror": "5.60.8", "moment": "2.29.4" }, "peerDependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" } }, "obsidianmd-obsidian-api-23947b5"],
+    "obsidian-daily-notes-interface/obsidian": ["obsidian@github:obsidianmd/obsidian-api#23947b5", { "dependencies": { "@types/codemirror": "5.60.8", "moment": "2.29.4" }, "peerDependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" } }, "obsidianmd-obsidian-api-23947b5", "sha512-11IkE3D6JQgv6HbgbuxC0ZmR8BNS7AdAqzSVKoWEDCjwsHDJl22lpmOjw5WMCe5mMplqvWBNGvI5FFDQ6fdqng=="],
 
     "obsidian-daily-notes-interface/tslib": ["tslib@2.1.0", "", {}, "sha512-hcVC3wYEziELGGmEEXue7D75zbwIIVUMWAVbHItGPx0ziyXxrOMQx4rQEVEV45Ut/1IotuEvwqPopzIOkDMf0A=="],
 
@@ -1438,7 +1438,7 @@
 
     "lazystream/readable-stream/string_decoder": ["string_decoder@1.1.1", "", { "dependencies": { "safe-buffer": "~5.1.0" } }, "sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg=="],
 
-    "obsidian-calendar-ui/obsidian-daily-notes-interface/obsidian": ["obsidian@github:obsidianmd/obsidian-api#23947b5", { "dependencies": { "@types/codemirror": "5.60.8", "moment": "2.29.4" }, "peerDependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" } }, "obsidianmd-obsidian-api-23947b5"],
+    "obsidian-calendar-ui/obsidian-daily-notes-interface/obsidian": ["obsidian@github:obsidianmd/obsidian-api#23947b5", { "dependencies": { "@types/codemirror": "5.60.8", "moment": "2.29.4" }, "peerDependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" } }, "obsidianmd-obsidian-api-23947b5", "sha512-11IkE3D6JQgv6HbgbuxC0ZmR8BNS7AdAqzSVKoWEDCjwsHDJl22lpmOjw5WMCe5mMplqvWBNGvI5FFDQ6fdqng=="],
 
     "obsidian-local-rest-api/express/accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 

@@ -98,7 +98,7 @@ vault 内パスを URL パスに埋め込む処理を書く・直すときは、
 ### 前提ツール
 
 - ランタイム/バンドラは Bun のみ（`mise.toml`: `bun = "latest"`、README は v1.1.42 以上）。Node は使わない。
-- 2026-09-03 時点でこのマシンに `bun` は入っていない（PATH になし、`~/.bun` なし）。`node_modules` も未生成。作業開始時にまず Bun を入れて `bun install` する。
+- このマシンには bun 1.4.0 が入っており、`bun install` 済み（2026-09-03）。bun 1.4 は `bun install` のたびに `bun.lock` の GitHub 依存 3 件に integrity ハッシュを追記して差分を出すが、解決バージョンは変わらない。
 - Windows で `link` スクリプトを使う場合、`symlinkSync(..., "dir")` はシンボリックリンク作成権限が要る。権限がなければ後述のコピー方式にする。
 
 ### ルートの scripts（`package.json`）
@@ -114,11 +114,11 @@ bun install
 Obsidian プラグイン（`packages/obsidian-plugin`）:
 
 ```bash
-cd packages/obsidian-plugin && bun run build
+cd packages/obsidian-plugin && GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/0.2.33" GITHUB_REF_NAME="0.2.33" bun run build
 ```
 
 `build` = `bun run check && bun bun.config.ts --prod`。型チェック後、リポジトリ直下に `main.js` が出る。`dev` は watch。
-未確認: `constants/bundle-time.ts` のマクロが `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` を要求する。`bun.config.ts` の `define` で値を注入しているが、マクロ実行時にそれで足りるかローカルでは未検証。`release.yml` は両方を環境変数として明示的に渡している。ローカルビルドが `Failed to get environment variables` で落ちたら、同じ 2 変数を export してから再実行する。
+**環境変数 2 つは必須**（確認済み）: `constants/bundle-time.ts` のマクロはビルド時に `process.env.GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` を読む。`bun.config.ts` の `define` はバンドル対象のソースにしか効かず、マクロ実行時には見えないので、変数なしで実行すると `Failed to get environment variables` → `cannot coerce Exception ... to Bun's AST` で落ちる。`release.yml` も同じ 2 変数を明示的に渡している。値はルート `package.json` の `version` に合わせる（`GITHUB_REF_NAME` は semver として `clean` される）。`GITHUB_DOWNLOAD_URL` は「Install Server」ボタンの取得先に埋め込まれるだけなので、fork でボタンを使わない限り値の中身は動作に影響しない。PowerShell なら `$env:GITHUB_DOWNLOAD_URL="..."; $env:GITHUB_REF_NAME="0.2.33"; bun run build`。
 
 MCP サーバ（`packages/mcp-server`）:
 
@@ -135,6 +135,8 @@ cd packages/mcp-server && bun test
 ```
 
 テストは `packages/mcp-server` にしかない（`src/shared/parseTemplateParameters.test.ts`, `src/features/fetch/services/markdown.test.ts`）。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。
+
+現状 13 件中 4 件が失敗する（2026-09-03 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
 
 ### vault へのインストール（Windows、この fork の運用）
 
