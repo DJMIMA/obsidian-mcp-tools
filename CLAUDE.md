@@ -81,9 +81,13 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 自分の vault にインストールされている Local REST API のバージョンでの挙動は未確認。ただし上流の現行実装で確定的に失敗する構造なので、修正方針は変わらない。
 - `/open/*`（`show_file_in_obsidian`）は上流では残り全体を一括デコードするので現状でも通るが、セグメント単位エンコードでも同じ結果になる。統一してよい。
 
-### `patch_vault_file` / `patch_active_file` が Local REST API 5.x で 400 になる（未修正）
+### `patch_vault_file` / `patch_active_file` が Local REST API 5.x で 400 になる（修正済み 2026-09-03）
 
-`verify:paths` の実行で判明。パスに関係なくルート直下でも失敗する。Local REST API 5.x は `Target-Type` / `Target` ヘッダによる PATCH 指定を「1.x 形式と 2.0 形式で曖昧」として扱い、`Markdown-Patch-Version` ヘッダで明示しないと `PatchHeaderTargetingRequiresExplicitVersion` を返す（上流 `requestHandler.ts` の `vaultPatch` 分岐、`constants.ts` のエラー文）。本リポジトリの 2 ツールは `Operation` / `Target-Type` / `Target` / `Target-Delimiter` / `Trim-Target-Whitespace` を送る 1.x 形式なので、最小の修正は両ツールのヘッダに `"Markdown-Patch-Version": "1"` を足すこと。`"2"` にすると Target の解釈が変わる（見出しは percent-encoded JSON 配列）ので、既存の引数スキーマのままなら `1` を選ぶ。
+`verify:paths` の実行で判明。パスに関係なくルート直下でも失敗していた。Local REST API 5.x は `Target-Type` / `Target` ヘッダによる PATCH 指定を「1.x 形式と 2.0 形式で曖昧」として扱い、`Markdown-Patch-Version` ヘッダで明示しないと `PatchHeaderTargetingRequiresExplicitVersion` を返す（上流 `requestHandler.ts` の `vaultPatch` 分岐、`constants.ts` のエラー文）。
+
+修正: 両ツールのヘッダに `"Markdown-Patch-Version": "1"` を追加。本リポジトリが送る `Operation` / `Target-Type` / `Target` / `Target-Delimiter` / `Trim-Target-Whitespace` は 1.x の header-driven 形式そのもの。`"2"` は Target の解釈が変わる（見出しは percent-encoded JSON 配列）ので選ばない。上流は 1.x 形式を deprecated とし、レスポンスに `Deprecation: true; sunset-version="6.0"` を付ける。Local REST API 6.0 で消える予定なので、その前に 2.0 形式（JSON instruction body）へ移行が必要になる。
+
+同時に直したもの: `Target` ヘッダを生のまま送っていたが、上流は `decodeURIComponent` で復号し、同梱の `packages/obsidian-plugin/docs/openapi.yaml` も「非 ASCII を含む場合は URL エンコードすること」と書いている。HTTP ヘッダは非 Latin-1 を生で運べないので、`見出し` のような日本語見出しを対象にすると壊れていた。両ツールで `encodeURIComponent(args.target)` に変更。
 
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
@@ -196,7 +200,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。`patch` の行は前述の 5.x 非互換が直るまで FAIL する。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出しと日本語見出し）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 5 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。2026-09-03 時点で 85/85 PASS。
 
 ## バージョン整合
 

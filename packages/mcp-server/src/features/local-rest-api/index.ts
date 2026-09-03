@@ -96,9 +96,14 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     ),
     async ({ arguments: args }) => {
       const headers: Record<string, string> = {
+        // Local REST API 5.x rejects header-based targeting unless the patch
+        // format is named explicitly; "1" is the header-driven format below.
+        "Markdown-Patch-Version": "1",
         Operation: args.operation,
         "Target-Type": args.targetType,
-        Target: args.target,
+        // The server decodes this header, and HTTP headers cannot carry
+        // non-Latin-1 characters raw, so headings like "見出し" must be encoded.
+        Target: encodeURIComponent(args.target),
         "Create-Target-If-Missing": "true",
       };
 
@@ -360,9 +365,14 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     ),
     async ({ arguments: args }) => {
       const headers: HeadersInit = {
+        // Local REST API 5.x rejects header-based targeting unless the patch
+        // format is named explicitly; "1" is the header-driven format below.
+        "Markdown-Patch-Version": "1",
         Operation: args.operation,
         "Target-Type": args.targetType,
-        Target: args.target,
+        // The server decodes this header, and HTTP headers cannot carry
+        // non-Latin-1 characters raw, so headings like "見出し" must be encoded.
+        Target: encodeURIComponent(args.target),
         "Create-Target-If-Missing": "true",
       };
 

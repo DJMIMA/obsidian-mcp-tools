@@ -75,12 +75,19 @@ let failures = 0;
 for (const p of patterns) {
   const steps: [string, () => Promise<Outcome>, (o: Outcome) => boolean][] = [
     ["get(absent)", () => call("get_vault_file", { filename: p.path }), (o) => !o.ok && /404/.test(o.error)],
-    ["create", () => call("create_vault_file", { filename: p.path, content: `# Title\n\nbody of ${p.id}\n` }), (o) => o.ok],
+    ["create", () => call("create_vault_file", { filename: p.path, content: `# Title\n\nbody of ${p.id}\n\n# 見出し\n\n日本語本文\n` }), (o) => o.ok],
     ["get", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`body of ${p.id}`)],
     ["append", () => call("append_to_vault_file", { filename: p.path, content: `\nappended ${p.id}\n` }), (o) => o.ok],
     ["get(after append)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`appended ${p.id}`)],
     ["patch", () => call("patch_vault_file", { filename: p.path, operation: "append", targetType: "heading", target: "Title", content: `patched ${p.id}\n` }), (o) => o.ok],
     ["get(after patch)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`patched ${p.id}`)],
+    // Non-ASCII heading target: the Target header must be URL-encoded to survive HTTP.
+    ["patch(ja heading)", () => call("patch_vault_file", { filename: p.path, operation: "append", targetType: "heading", target: "見出し", content: `ja-patched ${p.id}\n` }), (o) => o.ok],
+    ["get(after ja patch)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && /見出し[\s\S]*ja-patched/.test(o.text)],
+    // Open the file in the Obsidian UI so it becomes the active file, then patch it via /active/.
+    ["open", () => call("show_file_in_obsidian", { filename: p.path }), (o) => o.ok],
+    ["patch_active", async () => { await Bun.sleep(700); return call("patch_active_file", { operation: "append", targetType: "heading", target: "Title", content: `active-patched ${p.id}\n` }); }, (o) => o.ok],
+    ["get(after active patch)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`active-patched ${p.id}`)],
     ["get(json)", () => call("get_vault_file", { filename: p.path, format: "json" }), (o) => o.ok && o.text.includes(`"path"`)],
     ["list(parent)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && o.text.includes(p.path.split("/").pop()!)],
     // Callers sometimes pass the directory with a trailing slash; it must not become "dir//".
