@@ -6,3 +6,5 @@ export * from "./parseTemplateParameters";
 export * from "./ToolRegistry";
 export * from "./encodeVaultPath";
 export * from "./buildPatchInstruction";
+export * from "./applyPatch";
+export * from "./resolveHeadingTarget";

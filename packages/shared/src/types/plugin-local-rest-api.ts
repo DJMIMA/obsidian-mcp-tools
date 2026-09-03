@@ -214,7 +214,7 @@ export const ApiPatchParameters = type({
     "Identifies what to modify: a section under a heading, a referenced block, or a frontmatter field",
   ),
   target: type("string | string[]").describe(
-    "The node to edit. Heading: an array of heading texts from the top level down (e.g. ['Heading 1', 'Subheading 1:1']), or the same path as one string joined with targetDelimiter ('Heading 1::Subheading 1:1'); an empty string or [] addresses the document root. Block: the block id without '^'. Frontmatter: the field name",
+    "The node to edit. Heading: an array of heading texts from the top level down (e.g. ['Heading 1', 'Subheading 1:1']), or the same path as one string joined with targetDelimiter ('Heading 1::Subheading 1:1'). A partial path (just the leaf heading, or the last few levels) is accepted when it identifies exactly one heading; if it is ambiguous the call fails and lists the candidates. Heading text must match exactly (case, spaces, emoji). An empty string or [] addresses the document root. Block: the block id without '^'. Frontmatter: the field name",
   ),
   "targetDelimiter?": type("string").describe(
     "Separator used when a heading target is given as a single string (default '::'). Ignored when target is an array",
@@ -235,7 +235,7 @@ export const ApiPatchParameters = type({
     "Format of content. Use application/json to send structured data: table rows (a 2-D array of strings) for a block, or a typed value (list, object, number, ...) for a frontmatter field",
   ),
   "createTargetIfMissing?": type("boolean").describe(
-    "Create the heading path, block, or frontmatter key if it does not exist (default: true)",
+    "Create the heading path, block, or frontmatter key if it does not exist (default: false). A heading path is created from the top level exactly as given, so pass the full path. Only set this when you have confirmed the target is absent; a missing heading otherwise fails without writing and lists the headings that do exist",
   ),
   "rejectIfContentPreexists?": type("boolean").describe(
     "Fail an append/prepend when the content already appears in the target, which makes retries idempotent (default: false)",
@@ -314,3 +314,23 @@ export type ApiTemplateExecutionResponseType =
 
 // Additional API response types can be added here
 export const MIME_TYPE_OLRAPI_NOTE_JSON = "application/vnd.olrapi.note+json";
+
+export const MIME_TYPE_OLRAPI_DOCUMENT_MAP_JSON =
+  "application/vnd.olrapi.document-map+json";
+
+/**
+ * Document map of a note: the outline the markdown-patch 2.0 engine matches
+ * heading targets against.
+ * Content-Type: application/vnd.olrapi.document-map+json
+ * GET /vault/{filename} or GET /active/ with Accept: application/vnd.olrapi.document-map+json
+ * @property version - Content-hash token; send it back as a PATCH `ifMatch` for a conditional edit
+ * @property headings - Nested `{ "H1 text": { "H2 text": {} } }` tree of heading texts
+ * @property blocks - Block reference ids without the leading `^`
+ */
+export const ApiDocumentMapResponse = type({
+  version: "string",
+  frontmatterFields: "string[]",
+  headings: "Record<string, unknown>",
+  blocks: "string[]",
+});
+export type ApiDocumentMapResponseType = typeof ApiDocumentMapResponse.infer;

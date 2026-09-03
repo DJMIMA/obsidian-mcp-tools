@@ -3,7 +3,7 @@ import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { buildPatchInstruction } from "./buildPatchInstruction";
 
 describe("buildPatchInstruction", () => {
-  test("splits a '::'-joined heading path into an array and creates missing targets by default", () => {
+  test("splits a '::'-joined heading path into an array and does not create missing targets by default", () => {
     expect(
       buildPatchInstruction({
         operation: "append",
@@ -16,7 +16,6 @@ describe("buildPatchInstruction", () => {
       target: ["Heading 1", "Subheading 1:1"],
       operation: "append",
       content: "Hello",
-      createTargetIfMissing: true,
     });
   });
 
@@ -155,7 +154,7 @@ describe("buildPatchInstruction", () => {
     });
   });
 
-  test("within disables the createTargetIfMissing default", () => {
+  test("within does not enable createTargetIfMissing", () => {
     const result = buildPatchInstruction({
       operation: "append",
       targetType: "heading",
@@ -180,14 +179,22 @@ describe("buildPatchInstruction", () => {
     ).toThrow(McpError);
   });
 
-  test("createTargetIfMissing can be switched off explicitly", () => {
-    const result = buildPatchInstruction({
+  test("createTargetIfMissing must be opted into explicitly", () => {
+    const off = buildPatchInstruction({
       operation: "append",
       targetType: "heading",
       target: "A",
       content: "x",
       createTargetIfMissing: false,
     });
-    expect(result.createTargetIfMissing).toBeUndefined();
+    expect(off.createTargetIfMissing).toBeUndefined();
+    const on = buildPatchInstruction({
+      operation: "append",
+      targetType: "heading",
+      target: "A",
+      content: "x",
+      createTargetIfMissing: true,
+    });
+    expect(on.createTargetIfMissing).toBe(true);
   });
 });

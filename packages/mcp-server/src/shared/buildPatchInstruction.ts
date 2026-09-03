@@ -5,7 +5,8 @@ import type { LocalRestAPI } from "shared";
  * A markdown-patch 2.0 instruction: the JSON body Local REST API 5.x expects
  * on `PATCH /vault/{path}` and `PATCH /active/`. Field meanings are documented
  * in the upstream OpenAPI `PatchInstruction` schema. Heading moves (`scope:
- * "parent"` + `destination`) and `ifMatch` are not exposed by this tool set.
+ * "parent"` + `destination`) are not exposed by this tool set; `ifMatch` is filled in
+ * by the caller from the document map, not from tool arguments.
  */
 export interface PatchInstruction {
   targetType: "heading" | "block" | "frontmatter";
@@ -17,6 +18,8 @@ export interface PatchInstruction {
   value?: unknown;
   createTargetIfMissing?: boolean;
   rejectIfContentPreexists?: boolean;
+  /** Document-map `version` token; the engine rejects the edit if the file changed. */
+  ifMatch?: string;
 }
 
 const DEFAULT_HEADING_DELIMITER = "::";
@@ -97,15 +100,15 @@ export function buildPatchInstruction(
   }
 
   // --- flags ---
-  // Keep the pre-2.0 behaviour of creating missing targets by default, except
-  // for delete (nothing to create) and `within` (the engine forbids the pair).
+  // Creating a missing target is opt-in. With the old default (true) a heading
+  // path that merely failed to resolve was silently materialised as a new
+  // heading tree at the end of the file, which corrupted real notes.
   if (args.within !== undefined && args.createTargetIfMissing === true) {
     throw invalid("createTargetIfMissing cannot be combined with within");
   }
-  const createTargetIfMissing =
-    args.createTargetIfMissing ??
-    (args.operation !== "delete" && args.within === undefined);
-  if (createTargetIfMissing) instruction.createTargetIfMissing = true;
+  if (args.createTargetIfMissing === true) {
+    instruction.createTargetIfMissing = true;
+  }
   if (args.rejectIfContentPreexists) instruction.rejectIfContentPreexists = true;
 
   return instruction;
