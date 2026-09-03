@@ -88,6 +88,13 @@ for (const p of patterns) {
     ["open", () => call("show_file_in_obsidian", { filename: p.path }), (o) => o.ok],
     ["patch_active", async () => { await Bun.sleep(700); return call("patch_active_file", { operation: "append", targetType: "heading", target: "Title", content: `active-patched ${p.id}\n` }); }, (o) => o.ok],
     ["get(after active patch)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`active-patched ${p.id}`)],
+    // markdown-patch 2.0 features: array target, frontmatter value, delete
+    ["patch(array target)", () => call("patch_vault_file", { filename: p.path, operation: "append", targetType: "heading", target: ["Title"], content: `array-patched ${p.id}\n` }), (o) => o.ok],
+    ["get(after array patch)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`array-patched ${p.id}`)],
+    ["patch(frontmatter)", () => call("patch_vault_file", { filename: p.path, operation: "replace", targetType: "frontmatter", target: "status", content: `done-${p.id}` }), (o) => o.ok],
+    ["get(json, frontmatter)", () => call("get_vault_file", { filename: p.path, format: "json" }), (o) => o.ok && o.text.includes(`"status": "done-${p.id}"`)],
+    ["patch(delete ja section)", () => call("patch_vault_file", { filename: p.path, operation: "delete", targetType: "heading", target: "見出し" }), (o) => o.ok],
+    ["get(after delete)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes("見出し") && !o.text.includes("日本語本文")],
     ["get(json)", () => call("get_vault_file", { filename: p.path, format: "json" }), (o) => o.ok && o.text.includes(`"path"`)],
     ["list(parent)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && o.text.includes(p.path.split("/").pop()!)],
     // Callers sometimes pass the directory with a trailing slash; it must not become "dir//".

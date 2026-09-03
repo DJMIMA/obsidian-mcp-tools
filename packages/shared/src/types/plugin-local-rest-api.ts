@@ -207,28 +207,41 @@ export const ApiVaultFileResponse = type({
  * @property contentType - Format of the content - use application/json for structured data like table rows or frontmatter values
  */
 export const ApiPatchParameters = type({
-  operation: type("'append' | 'prepend' | 'replace'").describe(
-    "Specifies how to modify the content: append (add after), prepend (add before), or replace existing content",
+  operation: type("'append' | 'prepend' | 'replace' | 'delete'").describe(
+    "How to modify the targeted span: append (insert after), prepend (insert before), replace it, or delete it",
   ),
   targetType: type("'heading' | 'block' | 'frontmatter'").describe(
     "Identifies what to modify: a section under a heading, a referenced block, or a frontmatter field",
   ),
-  target: type("string").describe(
-    "The identifier - either heading path (e.g. 'Heading 1::Subheading 1:1'), block reference ID, or frontmatter field name",
+  target: type("string | string[]").describe(
+    "The node to edit. Heading: an array of heading texts from the top level down (e.g. ['Heading 1', 'Subheading 1:1']), or the same path as one string joined with targetDelimiter ('Heading 1::Subheading 1:1'); an empty string or [] addresses the document root. Block: the block id without '^'. Frontmatter: the field name",
   ),
   "targetDelimiter?": type("string").describe(
-    "The separator used in heading paths to indicate nesting (default '::')",
+    "Separator used when a heading target is given as a single string (default '::'). Ignored when target is an array",
+  ),
+  "scope?": type("'content' | 'marker' | 'markerAndContent'").describe(
+    "Which part of the target to act on (default 'content'). content: the body below a heading, the block body, or the field value. marker: the label only, i.e. the heading text, block id, or frontmatter key (replace renames it; do not include '#'). markerAndContent: the heading line together with its whole section (prepend/append insert a sibling section)",
+  ),
+  "within?": type("number").describe(
+    "Heading targets only: pick one of the section's top-level body blocks by 0-based index (negative counts from the end, -1 = last) and edit that block in place, e.g. append '\\n- item' to continue a list. Cannot be combined with createTargetIfMissing",
   ),
   "trimTargetWhitespace?": type("boolean").describe(
-    "Whether to remove whitespace from target identifier before matching (default: false)",
+    "Trim whitespace around each heading segment when target is given as a string (default: false)",
   ),
-  content: type("string").describe(
-    "The actual content to insert, append, or use as replacement",
+  "content?": type("string").describe(
+    "The payload to insert, append, or use as replacement. Required unless operation is delete. Heading levels inside it are relative to the target",
   ),
   "contentType?": type("'text/markdown' | 'application/json'").describe(
-    "Format of the content - use application/json for structured data like table rows or frontmatter values",
+    "Format of content. Use application/json to send structured data: table rows (a 2-D array of strings) for a block, or a typed value (list, object, number, ...) for a frontmatter field",
+  ),
+  "createTargetIfMissing?": type("boolean").describe(
+    "Create the heading path, block, or frontmatter key if it does not exist (default: true)",
+  ),
+  "rejectIfContentPreexists?": type("boolean").describe(
+    "Fail an append/prepend when the content already appears in the target, which makes retries idempotent (default: false)",
   ),
 });
+export type ApiPatchParametersType = typeof ApiPatchParameters.infer;
 
 /**
  * Represents a response containing markdown content

@@ -5,3 +5,4 @@ export * from "./makeRequest";
 export * from "./parseTemplateParameters";
 export * from "./ToolRegistry";
 export * from "./encodeVaultPath";
+export * from "./buildPatchInstruction";

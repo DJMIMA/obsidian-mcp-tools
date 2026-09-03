@@ -1,4 +1,9 @@
-import { encodeVaultPath, makeRequest, type ToolRegistry } from "$/shared";
+import {
+  buildPatchInstruction,
+  encodeVaultPath,
+  makeRequest,
+  type ToolRegistry,
+} from "$/shared";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { type } from "arktype";
 import { LocalRestAPI } from "shared";
@@ -92,38 +97,19 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       name: '"patch_active_file"',
       arguments: LocalRestAPI.ApiPatchParameters,
     }).describe(
-      "Insert or modify content in the currently-open note relative to a heading, block reference, or frontmatter field.",
+      "Insert, replace, or delete content in the currently-open note relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
     ),
     async ({ arguments: args }) => {
-      const headers: Record<string, string> = {
-        // Local REST API 5.x rejects header-based targeting unless the patch
-        // format is named explicitly; "1" is the header-driven format below.
-        "Markdown-Patch-Version": "1",
-        Operation: args.operation,
-        "Target-Type": args.targetType,
-        // The server decodes this header, and HTTP headers cannot carry
-        // non-Latin-1 characters raw, so headings like "見出し" must be encoded.
-        Target: encodeURIComponent(args.target),
-        "Create-Target-If-Missing": "true",
-      };
-
-      if (args.targetDelimiter) {
-        headers["Target-Delimiter"] = args.targetDelimiter;
-      }
-      if (args.trimTargetWhitespace !== undefined) {
-        headers["Trim-Target-Whitespace"] = String(args.trimTargetWhitespace);
-      }
-      if (args.contentType) {
-        headers["Content-Type"] = args.contentType;
-      }
+      // markdown-patch 2.0: the whole instruction travels as a JSON body.
+      const instruction = buildPatchInstruction(args);
 
       const response = await makeRequest(
         LocalRestAPI.ApiContentResponse,
         "/active/",
         {
           method: "PATCH",
-          headers,
-          body: args.content,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(instruction),
         },
       );
       return {
@@ -361,38 +347,19 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         filename: "string",
       }).and(LocalRestAPI.ApiPatchParameters),
     }).describe(
-      "Insert or modify content in a file relative to a heading, block reference, or frontmatter field.",
+      "Insert, replace, or delete content in a file relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
     ),
     async ({ arguments: args }) => {
-      const headers: HeadersInit = {
-        // Local REST API 5.x rejects header-based targeting unless the patch
-        // format is named explicitly; "1" is the header-driven format below.
-        "Markdown-Patch-Version": "1",
-        Operation: args.operation,
-        "Target-Type": args.targetType,
-        // The server decodes this header, and HTTP headers cannot carry
-        // non-Latin-1 characters raw, so headings like "見出し" must be encoded.
-        Target: encodeURIComponent(args.target),
-        "Create-Target-If-Missing": "true",
-      };
-
-      if (args.targetDelimiter) {
-        headers["Target-Delimiter"] = args.targetDelimiter;
-      }
-      if (args.trimTargetWhitespace !== undefined) {
-        headers["Trim-Target-Whitespace"] = String(args.trimTargetWhitespace);
-      }
-      if (args.contentType) {
-        headers["Content-Type"] = args.contentType;
-      }
+      // markdown-patch 2.0: the whole instruction travels as a JSON body.
+      const instruction = buildPatchInstruction(args);
 
       const response = await makeRequest(
         LocalRestAPI.ApiContentResponse,
         `/vault/${encodeVaultPath(args.filename)}`,
         {
           method: "PATCH",
-          headers,
-          body: args.content,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(instruction),
         },
       );
 
