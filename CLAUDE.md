@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 上流 `jacksteamdev/obsidian-mcp-tools` は archive 済み（README 冒頭に告知あり）。このリポジトリは個人フォークで、メンテは自分ひとり。
 - 上流への PR、上流との同期は行わない。CONTRIBUTING.md / SECURITY.md / `.github/` のテンプレート類は上流の遺物で、この fork の運用には関係ない。
 - 優先順位は「自分の vault で動くこと」。互換性や汎用性より、実機で通ることを優先する。
-- 注意: `git remote origin` は現在も `https://github.com/jacksteamdev/obsidian-mcp-tools.git` を指している。`scripts/version.ts` は `git push` まで自動で行うので、リリース系スクリプトを使う前に remote を自分のリポジトリへ向け直すこと。
+- remote は `origin` = `https://github.com/DJMIMA/obsidian-mcp-tools.git`（このフォーク、`main` の追跡先）、`upstream` = `https://github.com/jacksteamdev/obsidian-mcp-tools.git`（archive 済み）。`scripts/version.ts` の `git push` / `git push origin <tag>` はどちらも `origin` に入るので、そのまま使ってよい。`upstream` へは push しない。
 
 ## アーキテクチャ
 
@@ -250,7 +250,7 @@ cd packages/mcp-server && bun run build:windows && bun run verify:paths
 | `manifest.json`（ルート） | Obsidian が読む。`version` は package.json と同値に保つ。`minAppVersion` は `0.15.0` |
 | `versions.json`（ルート） | `{ "<plugin version>": "<minAppVersion>" }` の対応表。Obsidian のプラグイン更新判定用 |
 
-- `bun run version [patch|minor|major]`（`scripts/version.ts`）が package.json → manifest.json → versions.json の順に更新し、`git add` / `commit` / `tag` / `push` / `push origin <tag>` まで一括で行う。作業ツリーが clean で `main` にいないと止まる（`FORCE=true` で回避）。タグ push で `.github/workflows/release.yml` が走り、全プラットフォームのバイナリと plugin zip を GitHub Release に上げる。前述のとおり remote を直してから使うこと。
+- `bun run version [patch|minor|major]`（`scripts/version.ts`）が package.json → manifest.json → versions.json の順に更新し、`git add` / `commit` / `tag` / `push` / `push origin <tag>` まで一括で行う。作業ツリーが clean で `main` にいないと止まる（`FORCE=true` で回避）。タグ push で `.github/workflows/release.yml` が走り、全プラットフォームのバイナリと plugin zip を GitHub Release に上げる。push 先はどちらも `origin`（このフォーク）。
 - プラグインは起動時に `bin/mcp-server.exe --version` の出力と `manifest.version` を semver 比較し、サーバが古ければ `outdated` と表示する（`services/status.ts`）。自前ビルドのバイナリでもルート package.json の版が焼き込まれるので、プラグインとサーバを同じコミットからビルドすれば一致する。
 - `features/core/index.ts` の `new Server({ name: "obsidian-mcp-tools", version: "0.1.0" })` は固定文字列で、package.json と同期していない。MCP クライアントに見える版はこれ。
 - Local REST API 側: プラグインは npm パッケージ `obsidian-local-rest-api` ^2.5.4（lock: 2.5.4）を `getAPI` と型のためだけに依存している。**実行時に必要な Local REST API の版はコード上どこにも検査・固定されていない**。README の「Obsidian v1.7.7 以上」も manifest の `minAppVersion` には反映されていない（`0.15.0` のまま）。
