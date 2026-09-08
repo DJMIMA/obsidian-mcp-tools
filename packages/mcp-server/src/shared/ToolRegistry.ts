@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { type, type Type } from "arktype";
 import { formatMcpError } from "./formatMcpError.js";
+import { toolErrorResult } from "./toolErrorResult.js";
 import { logger } from "./logger.js";
 
 interface HandlerContext {
@@ -119,35 +120,51 @@ export class ToolRegistryClass<
     return { ...params, arguments: fixed };
   };
 
+  /**
+   * Runs the handler registered for `params.name`.
+   *
+   * A failure inside a tool is returned as a normal result with
+   * `isError: true` and the reason as text, not raised as a JSON-RPC error:
+   * clients collapse JSON-RPC errors into a generic "tool execution failed",
+   * which hides whether a file was missing, the path was wrong, the API key
+   * was rejected, or Obsidian was not running. Only a request for a tool that
+   * does not exist stays a protocol error.
+   */
   dispatch = async <Schema extends TSchema>(
     params: Schema["infer"],
     context: HandlerContext,
   ) => {
-    try {
-      for (const [schema, handler] of this.entries()) {
-        if (schema.get("name").allows(params.name)) {
+    for (const [schema, handler] of this.entries()) {
+      if (schema.get("name").allows(params.name)) {
+        try {
           const validParams = schema.assert(
             this.coerceBooleanParams(schema, params),
           );
           // return await to handle runtime errors here
           return await handler(validParams, context);
+        } catch (error) {
+          const formattedError = formatMcpError(error);
+          logger.error(`Error handling ${params.name}`, {
+            ...formattedError,
+            message: formattedError.message,
+            stack: formattedError.stack,
+            error,
+            params,
+          });
+          return toolErrorResult(error);
         }
       }
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `Unknown tool: ${params.name}`,
-      );
-    } catch (error) {
-      const formattedError = formatMcpError(error);
-      logger.error(`Error handling ${params.name}`, {
-        ...formattedError,
-        message: formattedError.message,
-        stack: formattedError.stack,
-        error,
-        params,
-      });
-      throw formattedError;
     }
+
+    const unknownTool = new McpError(
+      ErrorCode.InvalidRequest,
+      `Unknown tool: ${params.name}`,
+    );
+    logger.error(`Error handling ${params.name}`, {
+      message: unknownTool.message,
+      params,
+    });
+    throw unknownTool;
   };
 }
 

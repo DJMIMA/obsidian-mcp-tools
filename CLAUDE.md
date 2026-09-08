@@ -33,11 +33,13 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 
 クライアントは `packages/mcp-server/src/shared/makeRequest.ts` の `makeRequest(schema, path, init)` 1 本に集約されている。
 
-- ベース URL: `${PROTOCOL}://${HOST}:${PORT}`。既定は `https://127.0.0.1:27124`。`OBSIDIAN_USE_HTTP=true` で `http://...:27123`、`OBSIDIAN_HOST` でホスト変更。
+- ベース URL: `getBaseUrl()` が**呼び出しのたびに**環境変数から組み立てる。既定は `https://127.0.0.1:27124`。`OBSIDIAN_USE_HTTP=true` で `http://...:27123`、`OBSIDIAN_HOST` でホスト、`OBSIDIAN_PORT` でポートを変更できる（`OBSIDIAN_PORT` は 2026-09-08 に追加。テストがローカルのスタブサーバへ向けるために使う）。
 - 自己署名証明書対策で `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` をモジュール読み込み時に設定。
 - ヘッダ: `Authorization: Bearer ${OBSIDIAN_API_KEY}`、`Content-Type: text/markdown` を既定で付与し、`init.headers` で上書き可能。
 - URL は `` `${BASE_URL}${path}` `` の単純結合。**`makeRequest` 自体はパスのエンコードを一切行わない**。エンコードは呼び出し側（ツールごと）の責任になっている。
-- 非 2xx は `McpError(InternalError, "<METHOD> <path> <status>: <body>")`。レスポンスは Content-Type が json なら `json()`、それ以外は `text()` で読み、arktype スキーマで検証。204 は `undefined`。
+- 失敗はすべて `ObsidianApiError`（`shared/describeApiError.ts`）で投げる。`description` に人間/LLM 向けの説明、`status` に HTTP ステータス。詳細は「エラーハンドリング」の節。
+- レスポンスは Content-Type が json なら `json()`、それ以外は `text()` で読み、arktype スキーマで検証。204 は `undefined`。スキーマ不一致も `ObsidianApiError` になり、どのエンドポイントの応答が想定外だったかを含む。
+- `OBSIDIAN_REQUEST_TIMEOUT_MS` を設定するとその ms で `AbortSignal.timeout` を張る。**既定は無制限**（Templater 実行や意味検索が長時間かかりうるため）。
 
 パス組み立ては共通化されておらず、`features/local-rest-api/index.ts` ほかでツールごとに書かれている。現状の内訳：
 
@@ -110,6 +112,23 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 見出しテキストの照合は完全一致（大文字小文字・空白・絵文字を区別）。`trimTargetWhitespace` は送信前に各セグメントを trim するだけ。
 - 単体テストは `resolveHeadingTarget.test.ts`。実機は `verify:paths` の第 2 フェーズ（葉・部分・完全パス、`/`・絵文字・全角括弧を含む見出し、同名見出しの曖昧性、不在見出しの拒否と作成、`scope: markerAndContent` の H3 兄弟挿入、`patch_active_file` の葉解決）。
 
+### ツール失敗時のメッセージが `Tool execution failed` にしかならなかった（修正済み 2026-09-08）
+
+症状: 存在しないファイルを `get_vault_file` に渡すと、MCP クライアント側の表示が `Tool execution failed` だけになり、「ファイルが無い」「パス形式が不正」「API キーが違う」「Obsidian が起動していない」を区別できなかった。原因の切り分けに `get_server_info` / `list_vault_files` / 別ファイルの読み取りと 4〜5 回の追加呼び出しが必要だった。
+
+原因は 2 つ。(1) `makeRequest` が HTTP ステータスを `<METHOD> <path> <status>: <body>` に潰していた。(2) `ToolRegistry.dispatch` が例外を `McpError` として**送出**していたため JSON-RPC エラーになり、クライアントが汎用文言に丸めていた。
+
+対応:
+
+- **失敗はツール結果として返す**。`dispatch` は登録済みツールのハンドラ内で起きた失敗（引数検証も含む）を捕捉し、`toolErrorResult()` で `{ isError: true, content: [{ type: "text", text: <理由> }] }` を返す。JSON-RPC エラーのまま投げるのは**未知のツール名だけ**。MCP 仕様上「引数不正」は本来プロトコルエラーだが、クライアントが文言を潰すので LLM が自力で直せるようあえて結果として返している。
+- **HTTP / ネットワークの説明は 1 か所に集約**。`packages/mcp-server/src/shared/describeApiError.ts` の `describeHttpError(info, status, body)` と `describeNetworkError(info, error)`。ツールごとに書き分けない。`makeRequest` だけが呼ぶので、Local REST API を叩く全ツール（`features/local-rest-api` / `templates` / `prompts` / `smart-connections`）に自動的に効く。`features/fetch` は Local REST API を使わないが、`dispatch` 経由で `isError` にはなる。
+- 対応表: 404 → `File not found: <パス>` / `Directory not found: <パス>`（`/active/` なら「開いているファイルが無い」）、401・403 → `Authentication failed` + `OBSIDIAN_API_KEY` の確認を促す、400 → `Bad request` + API が返した `errorCode` / `message` をそのまま透過、405 → `Method not allowed`、409・412 → 事前条件の不一致（`ifMatch`）、5xx → ステータスと本文、接続不能 → `Cannot reach Obsidian Local REST API at <baseUrl>`、TLS → 証明書の再生成か `OBSIDIAN_USE_HTTP=true` を案内、DNS → `OBSIDIAN_HOST` の確認、タイムアウト → `OBSIDIAN_REQUEST_TIMEOUT_MS` の値付きで報告。どれも `Request: <METHOD> <URL>` の行を必ず含める。
+- ネットワークエラーは `cause` を最大 10 段たどって `code` / `name` / `message` を集める。Node 系（`ECONNREFUSED` を `TypeError: fetch failed` が包む）と Bun 系（`ConnectionRefused` / `FailedToOpenSocket`）の両方を見る。
+- **API キーは出力に載せない**。`redactSecrets()` が `process.env.OBSIDIAN_API_KEY` の出現をすべて `***` に置換する。`describeHttpError` / `describeNetworkError` / `describeToolError` の返り値は必ずこれを通っている。
+- `McpError` の `message` は SDK が `MCP error -32603: ` を前置するので、`describeToolError` がこの接頭辞を落としてから表示する。`applyPatch` が投げる見出し曖昧・不在のメッセージ（候補一覧付き）はそのまま LLM に届く。
+- `list_vault_files` は `formatVaultListing()`（`features/local-rest-api/formatVaultListing.ts`）で `{ count, files }` を返す。一覧が途中で切れたのか全件なのかを呼び出し側が判別できなかったため。Local REST API 側に上限は無いので `truncated` やカーソルは持たない。単一ファイル応答はそのまま。
+- 単体テストは `describeApiError.test.ts` / `toolErrorResult.test.ts` / `ToolRegistry.test.ts` / `formatVaultListing.test.ts`、および `makeRequest.test.ts`（`Bun.serve` で立てたスタブ Local REST API に `OBSIDIAN_PORT` で向ける実通信テスト）。実機は `verify:paths` の第 3 フェーズ。
+
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
 vault 内パスを URL パスに埋め込む処理を書く・直すときは、必ず `/` で分割してから各セグメントを `encodeURIComponent` し、`/` で再結合する。パス全体に `encodeURIComponent` をかけてはならない（`/` が `%2F` になり Local REST API がファイルとして解決しない）。エンコードなしで埋め込むのも不可（スペース・`#`・`?`・`%` で壊れる）。`makeRequest` はエンコードしないので、呼び出し側でヘルパーを通す。
@@ -155,9 +174,9 @@ cd packages/mcp-server && bun run build:windows
 cd packages/mcp-server && bun test
 ```
 
-テストは `packages/mcp-server` にしかない（`src/shared/parseTemplateParameters.test.ts`, `src/features/fetch/services/markdown.test.ts`）。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。
+テストは `packages/mcp-server` にしかない（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 13 件中 4 件が失敗する（2026-09-03 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
+現状 93 件中 4 件が失敗する（2026-09-08 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -213,7 +232,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 | d | 日本語ディレクトリ名 | `日記/2026-09-03.md` |
 | e | 3 階層以上のネスト | `a/b/c/note.md` |
 
-各パターンで最低限 `get_vault_file` → `create_vault_file`（または `append_to_vault_file`）→ `get_vault_file` で往復し、`list_vault_files` で親ディレクトリを列挙して見えることを確認する。エラーは `makeRequest` が `<METHOD> <path> <status>: <body>` の形で返すので、`<path>` にどうエンコードされたかがそのまま読める。
+各パターンで最低限 `get_vault_file` → `create_vault_file`（または `append_to_vault_file`）→ `get_vault_file` で往復し、`list_vault_files` で親ディレクトリを列挙して見えることを確認する。失敗時のメッセージには `Request: <METHOD> <URL>` の行が入るので、パスがどうエンコードされたかがそのまま読める。
 
 この 5 パターンを自動で回すスクリプトがある：
 
@@ -221,7 +240,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズが続く（前節）。2026-09-03 時点で 145/145 PASS。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-08 時点で 154/154 PASS。
 
 ## バージョン整合
 

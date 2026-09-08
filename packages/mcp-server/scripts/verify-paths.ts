@@ -5,7 +5,9 @@
  * stdio exactly like Claude Desktop does, then runs the five path patterns from
  * CLAUDE.md through get / create / append / patch / list / delete, then a
  * second phase that exercises heading targets below H1 (leaf, partial and
- * full paths, ambiguous and absent headings, sibling insertion). Test files
+ * full paths, ambiguous and absent headings, sibling insertion), then a third
+ * phase that checks a failed call says why it failed (missing file, wrong API
+ * key, Obsidian unreachable) without leaking the key. Test files
  * live under `_mcp-tools-test/` in the vault and are deleted afterwards; the
  * empty directories left behind are removed directly on disk.
  *
@@ -76,7 +78,8 @@ let failures = 0;
 
 for (const p of patterns) {
   const steps: [string, () => Promise<Outcome>, (o: Outcome) => boolean][] = [
-    ["get(absent)", () => call("get_vault_file", { filename: p.path }), (o) => !o.ok && /404/.test(o.error)],
+    // A missing file must say so by name, not just carry an HTTP status.
+    ["get(absent)", () => call("get_vault_file", { filename: p.path }), (o) => !o.ok && o.error.includes("File not found") && o.error.includes(p.path)],
     ["create", () => call("create_vault_file", { filename: p.path, content: `# Title\n\nbody of ${p.id}\n\n# 見出し\n\n日本語本文\n` }), (o) => o.ok],
     ["get", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes(`body of ${p.id}`)],
     ["append", () => call("append_to_vault_file", { filename: p.path, content: `\nappended ${p.id}\n` }), (o) => o.ok],
@@ -100,10 +103,12 @@ for (const p of patterns) {
     ["get(after delete)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes("見出し") && !o.text.includes("日本語本文")],
     ["get(json)", () => call("get_vault_file", { filename: p.path, format: "json" }), (o) => o.ok && o.text.includes(`"path"`)],
     ["list(parent)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && o.text.includes(p.path.split("/").pop()!)],
+    // The listing reports how many entries it holds, so a caller can tell a full list from a cut-off one.
+    ["list(count)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && JSON.parse(o.text).count === JSON.parse(o.text).files.length && JSON.parse(o.text).count > 0],
     // Callers sometimes pass the directory with a trailing slash; it must not become "dir//".
     ["list(parent, trailing /)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: `${dirname(p.path)}/` }), (o) => o.ok && o.text.includes(p.path.split("/").pop()!)],
     ["delete", () => call("delete_vault_file", { filename: p.path }), (o) => o.ok],
-    ["get(deleted)", () => call("get_vault_file", { filename: p.path }), (o) => !o.ok && /404/.test(o.error)],
+    ["get(deleted)", () => call("get_vault_file", { filename: p.path }), (o) => !o.ok && o.error.includes("File not found") && o.error.includes(p.path)],
   ];
 
   for (const [step, run, expect] of steps) {
@@ -188,6 +193,50 @@ for (const [step, run, expect] of headingSteps) {
 }
 
 await client.close();
+
+// --- phase 3: a failing call must say why, not just that it failed ---
+// Each case runs its own server process because the cause is configuration.
+async function callWithEnv(
+  overrides: Record<string, string>,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Outcome> {
+  const childEnv = { ...env, ...overrides };
+  const t = new StdioClientTransport({ command: serverPath, env: childEnv });
+  const c = new Client({ name: "verify-paths", version: "0.0.0" }, { capabilities: {} });
+  try {
+    await c.connect(t);
+    const result = (await c.callTool({ name, arguments: args })) as {
+      content?: { type: string; text?: string }[];
+      isError?: boolean;
+    };
+    const text = (result.content ?? []).map((x) => x.text ?? "").join("\n");
+    return result.isError ? { ok: false, error: text } : { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    await c.close().catch(() => {});
+  }
+}
+
+const noLeak = (o: Outcome) => !(o.ok ? o.text : o.error).includes(apiKey);
+
+const errorSteps: [string, () => Promise<Outcome>, (o: Outcome) => boolean][] = [
+  ["wrong API key", () => callWithEnv({ OBSIDIAN_API_KEY: "not-the-real-key" }, "get_vault_file", { filename: "README.md" }), (o) => !o.ok && /Authentication failed/.test(o.error) && noLeak(o)],
+  // Point at a port nothing listens on: Obsidian stopped, or the wrong port configured.
+  ["Obsidian unreachable", () => callWithEnv({ OBSIDIAN_PORT: "27199" }, "list_vault_files", {}), (o) => !o.ok && /Cannot reach Obsidian Local REST API/.test(o.error) && noLeak(o)],
+  ["missing file names the path", () => callWithEnv({}, "get_vault_file", { filename: "no such folder/no such note.md" }), (o) => !o.ok && o.error.includes("File not found: no such folder/no such note.md") && noLeak(o)],
+  ["unknown tool still an error", () => callWithEnv({}, "no_such_tool", {}), (o) => !o.ok && /Unknown tool/.test(o.error)],
+];
+for (const [step, run, expect] of errorSteps) {
+  const outcome = await run();
+  const pass = expect(outcome);
+  if (!pass) failures++;
+  const detail = outcome.ok
+    ? outcome.text.replace(/\s+/g, " ").slice(0, 60)
+    : outcome.error.replace(/\s+/g, " ").slice(0, 100);
+  rows.push(["e", "エラー識別", step, pass ? "PASS" : "FAIL", detail]);
+}
 
 // --- remove the empty test directory tree left in the vault ---
 let cleanup = "vault root unknown; leave _mcp-tools-test/ for manual removal";
