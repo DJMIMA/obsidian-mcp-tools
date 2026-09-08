@@ -181,3 +181,4 @@ bin/
 docs/planning/
 data.json
 cline_docs/temp/
+/packages/mcp-server/.bun-cache
