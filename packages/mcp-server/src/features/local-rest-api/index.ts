@@ -7,6 +7,7 @@ import {
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { type } from "arktype";
 import { LocalRestAPI } from "shared";
+import { formatVaultListing } from "./formatVaultListing";
 
 export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
   // GET Status
@@ -235,7 +236,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         `/vault/${path}`,
       );
       return {
-        content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        content: [{ type: "text", text: formatVaultListing(data) }],
       };
     },
   );
