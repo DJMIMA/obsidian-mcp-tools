@@ -129,6 +129,12 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - `list_vault_files` は `formatVaultListing()`（`features/local-rest-api/formatVaultListing.ts`）で `{ count, files }` を返す。一覧が途中で切れたのか全件なのかを呼び出し側が判別できなかったため。Local REST API 側に上限は無いので `truncated` やカーソルは持たない。単一ファイル応答はそのまま。
 - 単体テストは `describeApiError.test.ts` / `toolErrorResult.test.ts` / `ToolRegistry.test.ts` / `formatVaultListing.test.ts`、および `makeRequest.test.ts`（`Bun.serve` で立てたスタブ Local REST API に `OBSIDIAN_PORT` で向ける実通信テスト）。実機は `verify:paths` の第 3 フェーズ。
 
+### note JSON の frontmatter は型を仮定しない
+
+症状: `get_active_file` / `get_vault_file` の `format: "json"` が、`tags: ["#文献キュー"]` のような frontmatter を持つ実ノートで `frontmatter.tags must be a string (was an object)` になっていた（Local REST API 5.2.0、2026-09-24）。`ApiNoteJson.frontmatter` が `Record<string, string>` だったため。同じ応答を読む `ApiVaultFileResponse`（`execute_template` と MCP prompts、`list_vault_files` の union）は逆に `frontmatter.tags: string[]` を必須にしていて、タグの無いテンプレートやプロンプトを弾いていた。
+
+対応: `ApiNoteJson.frontmatter` を `Record<string, unknown>` にし、`ApiVaultFileResponse` は `ApiNoteJson` の別名にした。Local REST API の `getFileMetadataObject` は Obsidian のパース結果から `position` を消したものをそのまま返す（frontmatter が無ければ `{}`）ので、値はリスト・数値・真偽値・null・入れ子オブジェクトになりうる。常にあるのは `content` / `frontmatter` / `path` / `stat` / `tags`（frontmatter のリスト tags とインラインタグを `#` を外して合わせたもの）。frontmatter の値を読む側は型を確かめる（`prompts/index.ts` の `description`）。単体テストは `features/local-rest-api/noteJson.test.ts` と `makeRequest.test.ts`。
+
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
 vault 内パスを URL パスに埋め込む処理を書く・直すときは、必ず `/` で分割してから各セグメントを `encodeURIComponent` し、`/` で再結合する。パス全体に `encodeURIComponent` をかけてはならない（`/` が `%2F` になり Local REST API がファイルとして解決しない）。エンコードなしで埋め込むのも不可（スペース・`#`・`?`・`%` で壊れる）。`makeRequest` はエンコードしないので、呼び出し側でヘルパーを通す。
@@ -139,6 +145,7 @@ vault 内パスを URL パスに埋め込む処理を書く・直すときは、
 
 - ランタイム/バンドラは Bun のみ（`mise.toml`: `bun = "latest"`、README は v1.1.42 以上）。Node は使わない。
 - このマシンには bun 1.4.0 が入っており、`bun install` 済み（2026-09-03）。bun 1.4 は `bun install` のたびに `bun.lock` の GitHub 依存 3 件に integrity ハッシュを追記して差分を出すが、解決バージョンは変わらない。
+- `.claude/worktrees/` 下の worktree には `node_modules` が無く、そのままだと `shared` がリポジトリ本体の `node_modules/shared`（本体の `packages/shared` への junction）に解決される。worktree で `packages/shared` を変えても `bun run check` / `bun test` / ビルドは本体の古い `shared` を見て通ってしまう。worktree ではまず `bun install` し（`bun.lock` の差分は `git checkout -- bun.lock` で戻す）、`node_modules/shared` が worktree 側を指すことを確かめる。
 - Windows で `link` スクリプトを使う場合、`symlinkSync(..., "dir")` はシンボリックリンク作成権限が要る。権限がなければ後述のコピー方式にする。
 
 ### ルートの scripts（`package.json`）
@@ -176,7 +183,7 @@ cd packages/mcp-server && bun test
 
 テストは `packages/mcp-server` にしかない（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 93 件中 4 件が失敗する（2026-09-08 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
+現状 110 件中 4 件が失敗する（2026-09-24 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -240,7 +247,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-08 時点で 154/154 PASS。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-24 時点で 179/179 PASS。
 
 ## バージョン整合
 

@@ -16,10 +16,16 @@ export const ApiError = type({
  * JSON representation of a note including parsed tag and frontmatter data as well as filesystem metadata
  * Content-Type: application/vnd.olrapi.note+json
  * GET /vault/{filename} or GET /active/ with Accept: application/vnd.olrapi.note+json
+ *
+ * `frontmatter` is Obsidian's parsed YAML with `position` removed, or `{}` when
+ * the note has none. Values keep their YAML types (lists, numbers, booleans,
+ * dates as strings, nested objects, null), so only the object shape is
+ * checked. `tags` is always present: frontmatter list tags plus inline tags,
+ * with the leading `#` stripped.
  */
 export const ApiNoteJson = type({
   content: "string",
-  frontmatter: "Record<string, string>",
+  frontmatter: "Record<string, unknown>",
   path: "string",
   stat: {
     ctime: "number",
@@ -173,26 +179,11 @@ export const ApiVaultDirectoryResponse = type({
 });
 
 /**
- * Response containing vault file information
- * Content-Type: application/json
- * POST /vault/{pathToFile}
- * Returns array of matching files and their results
- * Results are only returned for non-falsy matches
+ * A vault file read with Accept: application/vnd.olrapi.note+json.
+ * Same payload as ApiNoteJson: frontmatter keys such as `tags` or
+ * `description` are not guaranteed, so readers must check them.
  */
-export const ApiVaultFileResponse = type({
-  frontmatter: {
-    tags: "string[]",
-    description: "string?",
-  },
-  content: "string",
-  path: "string",
-  stat: {
-    ctime: "number",
-    mtime: "number",
-    size: "number",
-  },
-  tags: "string[]",
-});
+export const ApiVaultFileResponse = ApiNoteJson;
 
 /**
  * Parameters for patching a file or document in the Obsidian plugin's REST API.

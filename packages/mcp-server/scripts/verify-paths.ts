@@ -76,6 +76,13 @@ const patterns: { id: string; label: string; path: string }[] = [
 const rows: string[][] = [];
 let failures = 0;
 
+/** The note JSON carries the list/number/boolean values set by the frontmatter patches. */
+const typedFrontmatter = (note: { frontmatter: Record<string, unknown>; tags: string[] }) =>
+  JSON.stringify(note.frontmatter.tags) === '["#文献キュー"]' &&
+  note.frontmatter.rating === 3 &&
+  note.frontmatter.draft === false &&
+  note.tags.includes("文献キュー");
+
 for (const p of patterns) {
   const steps: [string, () => Promise<Outcome>, (o: Outcome) => boolean][] = [
     // A missing file must say so by name, not just carry an HTTP status.
@@ -102,6 +109,12 @@ for (const p of patterns) {
     ["patch(delete ja section)", () => call("patch_vault_file", { filename: p.path, operation: "delete", targetType: "heading", target: "見出し" }), (o) => o.ok],
     ["get(after delete)", () => call("get_vault_file", { filename: p.path }), (o) => o.ok && o.text.includes("見出し") && !o.text.includes("日本語本文")],
     ["get(json)", () => call("get_vault_file", { filename: p.path, format: "json" }), (o) => o.ok && o.text.includes(`"path"`)],
+    // Frontmatter values keep their YAML types; the note JSON schema must not assume strings (bug 2026-09-24).
+    ["patch(frontmatter list)", () => call("patch_vault_file", { filename: p.path, operation: "replace", targetType: "frontmatter", target: "tags", contentType: "application/json", content: '["#文献キュー"]', createTargetIfMissing: true }), (o) => o.ok],
+    ["patch(frontmatter number)", () => call("patch_vault_file", { filename: p.path, operation: "replace", targetType: "frontmatter", target: "rating", contentType: "application/json", content: "3", createTargetIfMissing: true }), (o) => o.ok],
+    ["patch(frontmatter boolean)", () => call("patch_vault_file", { filename: p.path, operation: "replace", targetType: "frontmatter", target: "draft", contentType: "application/json", content: "false", createTargetIfMissing: true }), (o) => o.ok],
+    ["get(json, typed frontmatter)", async () => { await Bun.sleep(500); return call("get_vault_file", { filename: p.path, format: "json" }); }, (o) => o.ok && typedFrontmatter(JSON.parse(o.text))],
+    ["get_active(json, typed frontmatter)", () => call("get_active_file", { format: "json" }), (o) => o.ok && JSON.parse(o.text).path === p.path && typedFrontmatter(JSON.parse(o.text))],
     ["list(parent)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && o.text.includes(p.path.split("/").pop()!)],
     // The listing reports how many entries it holds, so a caller can tell a full list from a cut-off one.
     ["list(count)", () => call("list_vault_files", dirname(p.path) === "." ? {} : { directory: dirname(p.path) }), (o) => o.ok && JSON.parse(o.text).count === JSON.parse(o.text).files.length && JSON.parse(o.text).count > 0],
