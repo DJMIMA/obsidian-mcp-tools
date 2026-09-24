@@ -3,6 +3,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { type } from "arktype";
 import { DEFAULT_USER_AGENT } from "./constants";
+import { paginateContent } from "./paginateContent";
 import { convertHtmlToMarkdown } from "./services/markdown";
 
 export function registerFetchTool(tools: ToolRegistry, server: Server) {
@@ -59,35 +60,30 @@ export function registerFetchTool(tools: ToolRegistry, server: Server) {
           prefix = `Content type ${contentType} cannot be simplified to markdown, but here is the raw content:\n`;
         }
 
-        const maxLength = args.maxLength || 5000;
-        const startIndex = args.startIndex || 0;
-        const totalLength = content.length;
-
-        if (totalLength > maxLength) {
-          content = content.substring(startIndex, startIndex + maxLength);
-          content += `\n\n<error>Content truncated. Call the fetch tool with a startIndex of ${
-            startIndex + maxLength
-          } to get more content.</error>`;
-        }
+        const page = paginateContent(
+          content,
+          args.startIndex || 0,
+          args.maxLength || 5000,
+        );
 
         logger.debug("URL fetched successfully", {
           url: args.url,
-          contentLength: content.length,
+          contentLength: page.text.length,
         });
 
         return {
           content: [
             {
               type: "text",
-              text: `${prefix}Contents of ${args.url}:\n${content}`,
+              text: `${prefix}Contents of ${args.url}:\n${page.text}`,
             },
             {
               type: "text",
               text: `Pagination: ${JSON.stringify({
-                totalLength,
-                startIndex,
-                endIndex: startIndex + content.length,
-                hasMore: true,
+                totalLength: page.totalLength,
+                startIndex: page.startIndex,
+                endIndex: page.endIndex,
+                hasMore: page.hasMore,
               })}`,
             },
           ],
