@@ -10,10 +10,12 @@ export function registerFetchTool(tools: ToolRegistry, server: Server) {
     type({
       name: '"fetch"',
       arguments: {
-        url: "string",
-        "maxLength?": type("number").describe("Limit response length."),
+        url: type("string").describe("Absolute http(s) URL of the page"),
+        "maxLength?": type("number").describe(
+          "Maximum characters of content to return (default 5000)",
+        ),
         "startIndex?": type("number").describe(
-          "Supports paginated retrieval of content.",
+          "Character offset to start from when reading the next part of a long page (default 0)",
         ),
         "raw?": type("boolean").describe(
           "Returns raw HTML content if raw=true.",

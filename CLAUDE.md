@@ -37,7 +37,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 自己署名証明書対策で `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` をモジュール読み込み時に設定。
 - ヘッダ: `Authorization: Bearer ${OBSIDIAN_API_KEY}`、`Content-Type: text/markdown` を既定で付与し、`init.headers` で上書き可能。
 - URL は `` `${BASE_URL}${path}` `` の単純結合。**`makeRequest` 自体はパスのエンコードを一切行わない**。エンコードは呼び出し側（ツールごと）の責任になっている。
-- 失敗はすべて `ObsidianApiError`（`shared/describeApiError.ts`）で投げる。`description` に人間/LLM 向けの説明、`status` に HTTP ステータス。詳細は「エラーハンドリング」の節。
+- 失敗はすべて `ObsidianApiError`（`shared/describeApiError.ts`）で投げる。`description` に人間/LLM 向けの説明、`status` に HTTP ステータス。詳細は「ツールの失敗は `isError` 付きのツール結果として理由を返す」の節。
 - レスポンスは Content-Type が json なら `json()`、それ以外は `text()` で読み、arktype スキーマで検証。204 は `undefined`。スキーマ不一致も `ObsidianApiError` になり、どのエンドポイントの応答が想定外だったかを含む。
 - `OBSIDIAN_REQUEST_TIMEOUT_MS` を設定するとその ms で `AbortSignal.timeout` を張る。**既定は無制限**（Templater 実行や意味検索が長時間かかりうるため）。
 
@@ -60,7 +60,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
   - `features/fetch/index.ts`: `fetch`（Web ページ取得。Local REST API とは無関係）
   - `features/prompts/index.ts`: ツールではなく MCP prompts。vault の `Prompts/` 直下でタグ `mcp-tools-prompt` を持つ `.md` を列挙・実行する。
 - レスポンス型や共有の引数型（`ApiPatchParameters`, `ApiTemplateExecutionParams` など）は `packages/shared/src/types/plugin-local-rest-api.ts`。
-- PATCH 系 2 ツールは引数をそのまま送らず、`packages/mcp-server/src/shared/buildPatchInstruction.ts` で markdown-patch 2.0 の JSON instruction に変換してから送る（詳細は「既知の問題」）。
+- PATCH 系 2 ツールは引数をそのまま送らず、`packages/mcp-server/src/shared/buildPatchInstruction.ts` で markdown-patch 2.0 の JSON instruction に変換してから送る（詳細は「現行仕様とその理由」）。
 
 ツールを 1 つ追加・修正するとき触るファイル（依存関係から）：
 
@@ -69,9 +69,9 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 3. そのエンドポイントを本プラグインが提供するもの（`/search/smart`, `/templates/execute` の類）なら `packages/obsidian-plugin/src/main.ts` のルート登録とハンドラも。
 4. パスを URL に埋め込むなら後述の規約に従う。
 
-## 既知の問題と修正方針
+## 現行仕様とその理由（過去の不具合から）
 
-### サブディレクトリを含むパスで単一ファイル操作が全滅する（修正済み 2026-09-03）
+### vault パスはセグメント単位でエンコードする
 
 症状: `get_vault_file` / `create_vault_file` / `append_to_vault_file` / `patch_vault_file` / `delete_vault_file` は vault ルート直下のファイルでは成功し、`/` を含むパス（`folder/note.md`）では失敗していた。修正前のバイナリで `GET /vault/Daily%20log%2F... 404` を実機再現済み。
 
@@ -84,7 +84,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 自分の vault にインストールされている Local REST API のバージョンでの挙動は未確認。ただし上流の現行実装で確定的に失敗する構造なので、修正方針は変わらない。
 - `/open/*`（`show_file_in_obsidian`）は上流では残り全体を一括デコードするので現状でも通るが、セグメント単位エンコードでも同じ結果になる。統一してよい。
 
-### `patch_vault_file` / `patch_active_file` が Local REST API 5.x で 400 になる（修正済み 2026-09-03、markdown-patch 2.0 へ移行）
+### PATCH は markdown-patch 2.0 の JSON instruction で送る（Local REST API 5.x 前提）
 
 `verify:paths` の実行で判明。パスに関係なくルート直下でも失敗していた。Local REST API 5.x は PATCH の既定を markdown-patch 2.0（JSON instruction body）に変え、旧来の `Operation` / `Target-Type` / `Target` ヘッダ形式（1.x）は `Markdown-Patch-Version: 1` を付けたときだけ受け付ける（deprecated、6.0 で削除予定）。本リポジトリは 1.x 形式をヘッダなしで送っていたので `PatchHeaderTargetingRequiresExplicitVersion` で拒否されていた。さらに `Target` ヘッダを生で送っていたため、日本語見出しは HTTP ヘッダに載らず壊れていた。
 
@@ -97,7 +97,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 上流の `Markdown-Patch-Warnings` 応答ヘッダ（h6 超えなどの警告）は `makeRequest` がヘッダを返さないため拾っていない。
 - 2.0 の JSON body は Local REST API 5.x 前提。それより古い版との互換は捨てた（この fork の方針どおり）。
 
-### `patch_vault_file` / `patch_active_file` が H2 以下の見出しを解決できず、既定でファイル末尾に見出しを複製していた（修正済み 2026-09-03）
+### 見出し target は document map で完全パスに解決してから送り、既定では作らない
 
 症状: `target: "Plain"`（`## Plain`）や `"📝 本日の振り返り（事実）::AB"` のように**先頭の H1 を省いたパス**を渡すと 404 になり、既定の `createTargetIfMissing: true` によって `# Plain` のような新しい見出しツリーが EOF に追加されて「成功」と返っていた。実 vault のノートを壊した。
 
@@ -112,7 +112,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 見出しテキストの照合は完全一致（大文字小文字・空白・絵文字を区別）。`trimTargetWhitespace` は送信前に各セグメントを trim するだけ。
 - 単体テストは `resolveHeadingTarget.test.ts`。実機は `verify:paths` の第 2 フェーズ（葉・部分・完全パス、`/`・絵文字・全角括弧を含む見出し、同名見出しの曖昧性、不在見出しの拒否と作成、`scope: markerAndContent` の H3 兄弟挿入、`patch_active_file` の葉解決）。
 
-### ツール失敗時のメッセージが `Tool execution failed` にしかならなかった（修正済み 2026-09-08）
+### ツールの失敗は `isError` 付きのツール結果として理由を返す
 
 症状: 存在しないファイルを `get_vault_file` に渡すと、MCP クライアント側の表示が `Tool execution failed` だけになり、「ファイルが無い」「パス形式が不正」「API キーが違う」「Obsidian が起動していない」を区別できなかった。原因の切り分けに `get_server_info` / `list_vault_files` / 別ファイルの読み取りと 4〜5 回の追加呼び出しが必要だった。
 

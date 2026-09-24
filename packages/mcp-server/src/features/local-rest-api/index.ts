@@ -9,6 +9,10 @@ import { type } from "arktype";
 import { LocalRestAPI } from "shared";
 import { formatVaultListing } from "./formatVaultListing";
 
+const vaultFilename = type("string").describe(
+  "Path of the file relative to the vault root, including the extension, e.g. 'Projects/Plan.md'",
+);
+
 export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
   // GET Status
   tools.register(
@@ -16,7 +20,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       name: '"get_server_info"',
       arguments: "Record<string, unknown>",
     }).describe(
-      "Returns basic details about the Obsidian Local REST API and authentication status. This is the only API request that does not require authentication.",
+      "Returns the Obsidian Local REST API status: Obsidian and plugin versions, whether the configured API key is accepted (authenticated), and certificate details. Use it to check that Obsidian is running and reachable when other tools report connection or authentication errors. Returns no vault content.",
     ),
     async () => {
       const data = await makeRequest(LocalRestAPI.ApiStatusResponse, "/");
@@ -61,7 +65,9 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       arguments: {
         content: "string",
       },
-    }).describe("Update the content of the active file open in Obsidian."),
+    }).describe(
+      "Replace the entire content of the file currently open in Obsidian with the given content; anything not included is lost. To change one section use patch_active_file, and to add to the end use append_to_active_file. Fails if no file is open.",
+    ),
     async ({ arguments: args }) => {
       await makeRequest(LocalRestAPI.ApiNoContentResponse, "/active/", {
         method: "PUT",
@@ -125,7 +131,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"show_file_in_obsidian"',
       arguments: {
-        filename: "string",
+        filename: vaultFilename,
         "newLeaf?": "boolean",
       },
     }).describe(
@@ -157,7 +163,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         query: "string",
       },
     }).describe(
-      "Search for documents matching a specified query using either Dataview DQL or JsonLogic.",
+      "Run a structured query against every file in the vault. queryType 'dataview' takes a Dataview DQL TABLE query (LIST, TASK, and CALENDAR queries are not supported; requires the Dataview plugin). queryType 'jsonlogic' takes a JsonLogic expression as a JSON string, evaluated against each note's JSON form (content, frontmatter, tags, path, stat), with extra glob and regexp operators. Returns [{ filename, result }] only for files whose result is not falsy. For plain text matching use search_vault_simple.",
     ),
     async ({ arguments: args }) => {
       const contentType =
@@ -187,9 +193,13 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       name: '"search_vault_simple"',
       arguments: {
         query: "string",
-        "contextLength?": "number",
+        "contextLength?": type("number").describe(
+          "Characters of surrounding text to return with each match (default 100)",
+        ),
       },
-    }).describe("Search for documents matching a text query."),
+    }).describe(
+      "Text search across all files in the vault. Returns [{ filename, score, matches }], where each match has the match position (start, end) and a context snippet around it. Use search_vault for queries on frontmatter, tags, or paths, and search_vault_smart for meaning-based search.",
+    ),
     async ({ arguments: args }) => {
       const query = new URLSearchParams({
         query: args.query,
@@ -222,7 +232,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         "directory?": "string",
       },
     }).describe(
-      "List files in the root directory or a specified subdirectory of your vault.",
+      "List the entries directly inside a vault folder, or the vault root when directory is omitted. Not recursive: subfolders appear as names ending in '/', which can be passed back as directory. Empty folders are not listed. Returns { count, files } with names relative to the listed folder.",
     ),
     async ({ arguments: args }) => {
       // Strip any trailing slash the caller passed, then add exactly one so
@@ -246,10 +256,12 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"get_vault_file"',
       arguments: {
-        filename: "string",
+        filename: vaultFilename,
         "format?": '"markdown" | "json"',
       },
-    }).describe("Get the content of a file from your vault."),
+    }).describe(
+      "Read a file from the vault. format 'markdown' (default) returns the raw file text including frontmatter; format 'json' returns an object with content, parsed frontmatter, tags, path, and stat (ctime, mtime, size). Fails with 'File not found' when the path does not exist; list_vault_files shows the exact names in a folder.",
+    ),
     async ({ arguments: args }) => {
       const isJson = args.format === "json";
       const format = isJson
@@ -279,10 +291,12 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"create_vault_file"',
       arguments: {
-        filename: "string",
+        filename: vaultFilename,
         content: "string",
       },
-    }).describe("Create a new file in your vault or update an existing one."),
+    }).describe(
+      "Create a file, or overwrite it if it already exists: the whole file is replaced with the given content. Missing parent folders are created. To change part of an existing file use patch_vault_file, and to add to the end use append_to_vault_file.",
+    ),
     async ({ arguments: args }) => {
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
@@ -303,7 +317,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"append_to_vault_file"',
       arguments: {
-        filename: "string",
+        filename: vaultFilename,
         content: "string",
       },
     }).describe("Append content to a new or existing file."),
@@ -327,7 +341,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"patch_vault_file"',
       arguments: type({
-        filename: "string",
+        filename: vaultFilename,
       }).and(LocalRestAPI.ApiPatchParameters),
     }).describe(
       "Insert, replace, or delete content in a file relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
@@ -345,7 +359,7 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"delete_vault_file"',
       arguments: {
-        filename: "string",
+        filename: vaultFilename,
       },
     }).describe("Delete a file from your vault."),
     async ({ arguments: args }) => {
