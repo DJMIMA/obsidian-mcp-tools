@@ -49,9 +49,11 @@ export function setupObsidianPrompts(server: Server) {
               return [];
             }
 
+            const { description } = file.frontmatter;
             return {
               name: filename,
-              description: file.frontmatter.description,
+              description:
+                typeof description === "string" ? description : undefined,
               arguments: parseTemplateParameters(file.content),
             };
           }),

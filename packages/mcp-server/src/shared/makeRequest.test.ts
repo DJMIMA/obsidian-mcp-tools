@@ -1,5 +1,6 @@
 import { type } from "arktype";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { LocalRestAPI } from "shared";
 import { ObsidianApiError } from "./describeApiError";
 import { makeRequest } from "./makeRequest";
 
@@ -54,6 +55,32 @@ describe("makeRequest", () => {
     expect(await makeRequest(OkResponse, "/vault/note.md")).toEqual({
       ok: true,
     });
+  });
+
+  test("accepts a note JSON whose frontmatter holds lists, numbers, and booleans", async () => {
+    const note = {
+      content: '---\ntags: ["#文献キュー"]\ncreated: 2026-06-16\n---\n',
+      frontmatter: {
+        tags: ["#文献キュー"],
+        created: "2026-06-16",
+        rating: 3,
+        read: false,
+      },
+      path: "文献/note.md",
+      stat: { ctime: 1, mtime: 2, size: 3 },
+      tags: ["文献キュー"],
+    };
+    reply = () =>
+      new Response(JSON.stringify(note), {
+        headers: { "Content-Type": LocalRestAPI.MIME_TYPE_OLRAPI_NOTE_JSON },
+      });
+
+    expect(
+      await makeRequest(
+        LocalRestAPI.ApiNoteJson,
+        "/vault/%E6%96%87%E7%8C%AE/note.md",
+      ),
+    ).toEqual(note);
   });
 
   test("sends the API key as a bearer token", async () => {
