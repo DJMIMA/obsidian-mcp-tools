@@ -272,7 +272,9 @@ export const ApiNoContentResponse = type("unknown").describe("No Content");
  */
 export const ApiTemplateExecutionParams = type({
   name: type("string").describe("The full vault path to the template file"),
-  arguments: "Record<string, string>",
+  arguments: type("Record<string, string>").describe(
+    'Values for the template\'s tp.mcpTools.prompt("<argument name>") calls, keyed by argument name',
+  ),
   "createFile?": type("boolean").describe(
     "Whether to create a new file from the template",
   ),

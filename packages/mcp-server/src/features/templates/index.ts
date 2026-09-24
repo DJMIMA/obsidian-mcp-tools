@@ -15,10 +15,14 @@ export function registerTemplaterTools(tools: ToolRegistry) {
       arguments: LocalRestAPI.ApiTemplateExecutionParams.omit("createFile").and(
         {
           // should be boolean but the MCP client returns a string
-          "createFile?": type("'true'|'false'"),
+          "createFile?": type("'true'|'false'").describe(
+            "'true' to also save the output to targetPath as a new file (fails if that file exists)",
+          ),
         },
       ),
-    }).describe("Execute a Templater template with the given arguments"),
+    }).describe(
+      'Render a Templater template stored in the vault and return { message, content } with the rendered text. name is the template\'s vault path. arguments supplies the values read by tp.mcpTools.prompt("<argument name>") calls in the template; an argument that is not supplied renders as an empty string. With createFile \'true\' and a targetPath, the output is also saved as a new file; without targetPath nothing is saved.',
+    ),
     async ({ arguments: args }) => {
       // Get prompt content
       const data = await makeRequest(
