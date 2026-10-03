@@ -3,6 +3,8 @@
  * (docs/superpowers/specs/2026-10-03-semantic-search-design.md, 実機確認).
  *
  *   bun scripts/eval-semantic.ts capture <label>   run the queries (limit 20) and save the results
+ *   bun scripts/eval-semantic.ts pool <labelA> <labelB>    write a judging note into the vault
+ *   bun scripts/eval-semantic.ts score <labelA> <labelB>   read the ticks and print metrics
  *
  * Results go to %LOCALAPPDATA%/obsidian-mcp-tools/semantic-eval, outside the
  * repo and the vault, because they name personal notes. Only paths,
@@ -10,7 +12,7 @@
  * REST API key and the vault location come from the Claude Desktop config;
  * the key is never printed.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -102,10 +104,114 @@ async function capture(label: string): Promise<void> {
   console.log(`saved ${file}`);
 }
 
+const EVAL_DIR = "_mcp-tools-eval";
+const JUDGMENT_FILE = "judgments.md";
+
+function load(label: string): Capture {
+  const capture = JSON.parse(readFileSync(resolve(outDir, `${label}.json`), "utf8")) as Capture;
+  capture.runs.forEach((run, i) => {
+    if (run.query !== QUERIES[i]) throw new Error(`${label}.json query ${i + 1} does not match QUERIES`);
+  });
+  return capture;
+}
+
+/** Note paths in rank order, each note once (judging is per note). */
+function rankedNotes(run: CapturedRun): string[] {
+  const out: string[] = [];
+  for (const result of run.results) if (!out.includes(result.notePath)) out.push(result.notePath);
+  return out;
+}
+
+function judgmentPath(): string {
+  if (!vaultRoot) throw new Error(`vault location not found in ${configPath}`);
+  return resolve(vaultRoot, EVAL_DIR, JUDGMENT_FILE);
+}
+
+function pool(labelA: string, labelB: string): void {
+  const a = load(labelA);
+  const b = load(labelB);
+  const lines = [
+    "# Semantic search judgments",
+    "",
+    "検索語ごとに、関連するノートの `[ ]` を `[x]` にしてください。並びは名前順で、どちらの方式の結果か、何位だったかは伏せています。",
+    "",
+  ];
+  QUERIES.forEach((query, i) => {
+    const notes = Array.from(new Set([...rankedNotes(a.runs[i]), ...rankedNotes(b.runs[i])])).sort((x, y) =>
+      x.localeCompare(y),
+    );
+    lines.push(`## Q${i + 1}. ${query}`, "");
+    for (const note of notes) lines.push(`- [ ] [[${note.replace(/\.md$/, "")}]]`);
+    lines.push("");
+  });
+  const file = judgmentPath();
+  if (existsSync(file)) throw new Error(`${file} already exists; delete it first so no ticks are lost by accident`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, lines.join("\n"));
+  console.log(`wrote ${file}`);
+}
+
+function readJudgments(): Map<number, Set<string>> {
+  const relevant = new Map<number, Set<string>>();
+  let current = -1;
+  for (const line of readFileSync(judgmentPath(), "utf8").split(/\r?\n/)) {
+    const heading = /^## Q(\d+)\./.exec(line);
+    if (heading) {
+      current = Number(heading[1]) - 1;
+      relevant.set(current, new Set());
+      continue;
+    }
+    const item = /^- \[([ xX])\] \[\[(.+)\]\]\s*$/.exec(line);
+    if (item && current >= 0 && item[1] !== " ") relevant.get(current)!.add(`${item[2]}.md`);
+  }
+  return relevant;
+}
+
+function score(labelA: string, labelB: string): void {
+  const captures = [load(labelA), load(labelB)];
+  const judged = readJudgments();
+  const totals = captures.map(() => ({ top10: 0, top20: 0, reciprocal: 0, recall: 0, recallCount: 0, chars: 0 }));
+  const header = captures.map((c) => `${c.label} 上位10 | 上位20 | 初出 | 再現率 | ノート数 | 文字数`).join(" | ");
+  console.log(`| Q | 関連 | ${header} |`);
+  console.log(`|---|---|${captures.map(() => "---|---|---|---|---|---").join("|")}|`);
+  QUERIES.forEach((_, i) => {
+    const relevant = judged.get(i) ?? new Set<string>();
+    const cells = captures.map((capture, c) => {
+      const run = capture.runs[i];
+      const ranked = rankedNotes(run);
+      const top10 = ranked.slice(0, 10).filter((n) => relevant.has(n)).length;
+      const top20 = ranked.slice(0, 20).filter((n) => relevant.has(n)).length;
+      const first = ranked.findIndex((n) => relevant.has(n)) + 1;
+      const recall = relevant.size > 0 ? ranked.filter((n) => relevant.has(n)).length / relevant.size : null;
+      const chars = run.results.reduce((sum, r) => sum + r.textChars, 0);
+      const t = totals[c];
+      t.top10 += top10;
+      t.top20 += top20;
+      t.reciprocal += first > 0 ? 1 / first : 0;
+      if (recall !== null) {
+        t.recall += recall;
+        t.recallCount++;
+      }
+      t.chars += chars;
+      return `${top10} | ${top20} | ${first || "-"} | ${recall === null ? "-" : recall.toFixed(2)} | ${ranked.length} | ${chars}`;
+    });
+    console.log(`| ${i + 1} | ${relevant.size} | ${cells.join(" | ")} |`);
+  });
+  const n = QUERIES.length;
+  const summary = totals
+    .map((t) => `${(t.top10 / n).toFixed(1)} | ${(t.top20 / n).toFixed(1)} | MRR ${(t.reciprocal / n).toFixed(2)} | ${t.recallCount ? (t.recall / t.recallCount).toFixed(2) : "-"} | | ${Math.round(t.chars / n)}`)
+    .join(" | ");
+  console.log(`| 平均 | | ${summary} |`);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (command === "capture" && args[0]) {
   await capture(args[0]);
+} else if (command === "pool" && args[0] && args[1]) {
+  pool(args[0], args[1]);
+} else if (command === "score" && args[0] && args[1]) {
+  score(args[0], args[1]);
 } else {
-  console.error("usage: bun scripts/eval-semantic.ts capture <label>");
+  console.error("usage: bun scripts/eval-semantic.ts capture <label> | pool <labelA> <labelB> | score <labelA> <labelB>");
   process.exit(1);
 }
