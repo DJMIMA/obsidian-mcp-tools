@@ -13,6 +13,7 @@
 	"scripts": {
 		"build": "bun run check && bun bun.config.ts --prod",
 		"check": "tsc --noEmit",
+		"test": "bun test src",
 		"dev": "bun --watch run bun.config.ts --watch",
 		"link": "bun scripts/link.ts",
 		"release": "run-s build zip",
