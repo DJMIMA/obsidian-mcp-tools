@@ -1,27 +1,21 @@
 import { type } from "arktype";
 import type { Request, Response } from "express";
 import { Notice, Plugin, TFile } from "obsidian";
-import { shake } from "radash";
 import { lastValueFrom } from "rxjs";
-import {
-  jsonSearchRequest,
-  LocalRestAPI,
-  searchParameters,
-  Templater,
-  type PromptArgAccessor,
-  type SearchResponse,
-} from "shared";
+import { LocalRestAPI, Templater, type PromptArgAccessor } from "shared";
 import { setup as setupCore } from "./features/core";
 import { setup as setupMcpServerInstall } from "./features/mcp-server-install";
+import { SemanticSearchFeature } from "./features/semantic-search";
 import {
   loadLocalRestAPI,
-  loadSmartSearchAPI,
   loadTemplaterAPI,
   type Dependencies,
 } from "./shared";
 import { logger } from "./shared/logger";
 
 export default class McpToolsPlugin extends Plugin {
+  semanticSearch!: SemanticSearchFeature;
+
   private localRestApi: Dependencies["obsidian-local-rest-api"] = {
     id: "obsidian-local-rest-api",
     name: "Local REST API",
@@ -35,6 +29,9 @@ export default class McpToolsPlugin extends Plugin {
   }
 
   async onload() {
+    this.semanticSearch = new SemanticSearchFeature(this);
+    await this.semanticSearch.load();
+
     // Initialize features in order
     await setupCore(this);
     await setupMcpServerInstall(this);
@@ -54,7 +51,7 @@ export default class McpToolsPlugin extends Plugin {
       // Register endpoints
       this.localRestApi.api
         .addRoute("/search/smart")
-        .post(this.handleSearchRequest.bind(this));
+        .post((req, res) => this.semanticSearch.handleSearchRoute(req, res));
 
       this.localRestApi.api
         .addRoute("/templates/execute")
@@ -163,70 +160,8 @@ export default class McpToolsPlugin extends Plugin {
     }
   }
 
-  private async handleSearchRequest(req: Request, res: Response) {
-    try {
-      const dep = await lastValueFrom(loadSmartSearchAPI(this));
-      const smartSearch = dep.api;
-      if (!smartSearch) {
-        new Notice(
-          "Smart Search REST API Plugin: smart-connections plugin is required but not found. Please install it from the community plugins.",
-          0,
-        );
-        res.status(503).json({
-          error: "Smart Connections plugin is not available",
-        });
-        return;
-      }
-
-      // Validate request body
-      const requestBody = jsonSearchRequest
-        .pipe(({ query, filter = {} }) => ({
-          query,
-          filter: shake({
-            key_starts_with_any: filter.folders,
-            exclude_key_starts_with_any: filter.excludeFolders,
-            limit: filter.limit,
-          }),
-        }))
-        .to(searchParameters)(req.body);
-      if (requestBody instanceof type.errors) {
-        res.status(400).json({
-          error: "Invalid request body",
-          summary: requestBody.summary,
-        });
-        return;
-      }
-
-      // Perform search
-      const results = await smartSearch.search(
-        requestBody.query,
-        requestBody.filter,
-      );
-
-      // Format response
-      const response: SearchResponse = {
-        results: await Promise.all(
-          results.map(async (result) => ({
-            path: result.item.path,
-            text: await result.item.read(),
-            score: result.score,
-            breadcrumbs: result.item.breadcrumbs,
-          })),
-        ),
-      };
-
-      res.json(response);
-      return;
-    } catch (error) {
-      logger.error("Smart Search API error:", { error, body: req.body });
-      res.status(503).json({
-        error: "An error occurred while processing the search request",
-      });
-      return;
-    }
-  }
-
   onunload() {
+    this.semanticSearch?.dispose();
     this.localRestApi.api?.unregister();
   }
 }
