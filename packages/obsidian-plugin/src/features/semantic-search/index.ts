@@ -35,6 +35,8 @@ import {
   type SemanticSearchSettings,
 } from "./settings";
 
+export { default as SemanticSearchSettingsView } from "./components/SemanticSearchSettings.svelte";
+
 const SAVE_DELAY_MS = 30_000;
 const RESOLVE_TIMEOUT_MS = 10_000;
 
