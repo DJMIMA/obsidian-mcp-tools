@@ -277,7 +277,7 @@ export function describeNetworkError(
       info.timeoutMs !== undefined ? ` after ${info.timeoutMs}ms` : "";
     summary =
       `Request to ${info.method} ${shown} timed out${limit}. Obsidian may be busy, ` +
-      "or a Templater/Smart Connections operation may still be running.";
+      "or a Templater or semantic search operation may still be running.";
   } else if (isTls) {
     summary =
       `TLS handshake failed for ${info.baseUrl}. The Local REST API's self-signed certificate ` +

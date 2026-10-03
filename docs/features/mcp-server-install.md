@@ -15,7 +15,6 @@ The installation feature is implemented in the Obsidian plugin package under `sr
    - Claude Desktop installed
    - Local REST API plugin installed and configured with API key
    - (Optional) Templater plugin for enhanced functionality
-   - (Optional) Smart Connections plugin for enhanced search
 
 2. Installation Steps:
    - User navigates to plugin settings
@@ -206,7 +205,6 @@ src/features/mcp-server-install/
 ### Recommended Plugins
 Added information about recommended plugins that enhance functionality:
 - Templater: For template-based operations
-- Smart Connections: For enhanced search capabilities
 - Local REST API: Required for Obsidian communication
 
 ### Platform Compatibility

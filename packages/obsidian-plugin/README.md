@@ -5,7 +5,7 @@ The Obsidian plugin component of MCP Tools, providing secure MCP server integrat
 ## Features
 
 - **Secure Access**: All communication encrypted and authenticated through Local REST API
-- **Semantic Search**: Seamless integration with Smart Connections for context-aware search
+- **Semantic Search**: Builds its own embedding index (Cohere or any OpenAI-compatible API) for context-aware search
 - **Template Support**: Execute Templater templates through MCP clients
 - **File Management**: Comprehensive vault access and management capabilities
 - **Security First**: Binary attestation and secure key management
@@ -19,7 +19,6 @@ The Obsidian plugin component of MCP Tools, providing secure MCP server integrat
 
 ### Recommended
 
-- [Smart Connections](https://smartconnections.app/) for semantic search
 - [Templater](https://silentvoid13.github.io/Templater/) for template execution
 
 ## Development

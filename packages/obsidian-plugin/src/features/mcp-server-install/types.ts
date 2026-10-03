@@ -1,4 +1,4 @@
-import type { Templater, SmartConnections } from "shared";
+import type { Templater } from "shared";
 
 export interface SetupResult {
   success: boolean;
@@ -50,9 +50,6 @@ declare module "obsidian" {
             apiKey?: string;
           };
         };
-        ["smart-connections"]?: {
-          env?: SmartConnections.SmartSearch;
-        } & Plugin;
         ["templater-obsidian"]?: {
           templater?: Templater.ITemplater;
         };

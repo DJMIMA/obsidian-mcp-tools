@@ -26,7 +26,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 1. プラグインの設定画面 (`features/mcp-server-install/components/McpServerInstallSettings.svelte`) の「Install Server」が、`services/install.ts` でバイナリを GitHub Releases からダウンロードして `{vault}/.obsidian/plugins/mcp-tools/bin/mcp-server.exe`（Windows。`constants/index.ts` の `BINARY_NAME`）へ置く。ダウンロード URL は `constants/bundle-time.ts` のマクロで**ビルド時に埋め込まれる** `GITHUB_DOWNLOAD_URL`（= `https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/<version>`、`bun.config.ts` の `define`）。つまりこの fork をそのままビルドしても「Install Server」は上流の archive 済みリリースを取りに行く。fork では自前ビルドのバイナリを手で置く運用になる（後述）。
 2. 同じ流れで `services/config.ts` が Claude Desktop の設定ファイル（Windows: `%APPDATA%\Claude\claude_desktop_config.json`）に `mcpServers["obsidian-mcp-tools"] = { command: <バイナリの絶対パス>, env: { OBSIDIAN_API_KEY } }` を書き込む。API キーは Local REST API プラグインの設定から読む (`main.ts` の `getLocalRestApiKey()` → `app.plugins.plugins["obsidian-local-rest-api"].settings.apiKey`)。
 3. 実行時は Claude Desktop 等の MCP クライアントがバイナリを起動し、バイナリが HTTP(S) で Local REST API に接続する。
-4. プラグイン側は Local REST API の `getAPI(...).addRoute()` で 2 本のルートを Local REST API 上に追加している (`main.ts`)：`POST /search/smart`（Smart Connections 経由の意味検索）と `POST /templates/execute`（Templater 実行）。この 2 つのエンドポイントは Local REST API 本体ではなく本プラグインが Obsidian 内で処理している。
+4. プラグイン側は Local REST API の `getAPI(...).addRoute()` で 2 本のルートを Local REST API 上に追加している (`main.ts`)：`POST /search/smart`（本プラグインの埋め込み索引による意味検索。後述）と `POST /templates/execute`（Templater 実行）。この 2 つのエンドポイントは Local REST API 本体ではなく本プラグインが Obsidian 内で処理している。
 5. `services/uninstall.ts` は Claude 設定のパスを macOS 固定 (`Library/Application Support/Claude/...`) で組んでおり `CLAUDE_CONFIG_PATH` を使っていない。Windows ではアンインストール時に設定エントリが消えない。
 
 ### Local REST API への HTTP クライアント層
@@ -52,10 +52,10 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 ### MCP ツール定義
 
 - 登録機構は `packages/mcp-server/src/shared/ToolRegistry.ts`。`tools.register(schema, handler)` の `schema` は arktype の `type({ name: '"tool_name"', arguments: {...} }).describe("説明")`。`name` のリテラルがツール名、`.describe()` が description、`arguments` が `toJsonSchema()` を通って inputSchema になる。つまり**入力スキーマはツール定義と同じ場所に書く**。`dispatch` は `schema.assert` で検証し、MCP クライアントが文字列で送ってくる `"true"/"false"` を boolean に矯正する。
-- 登録の呼び出し元は `features/core/index.ts` の `setupHandlers()`：`registerFetchTool`, `registerLocalRestApiTools`, `registerSmartConnectionsTools`, `registerTemplaterTools`, `setupObsidianPrompts`。
+- 登録の呼び出し元は `features/core/index.ts` の `setupHandlers()`：`registerFetchTool`, `registerLocalRestApiTools`, `registerSemanticSearchTools`, `registerTemplaterTools`, `setupObsidianPrompts`。
 - ツールの実体：
   - `features/local-rest-api/index.ts`: `get_server_info`, `get_active_file`, `update_active_file`, `append_to_active_file`, `patch_active_file`, `delete_active_file`, `show_file_in_obsidian`, `search_vault`, `search_vault_simple`, `list_vault_files`, `get_vault_file`, `create_vault_file`, `append_to_vault_file`, `patch_vault_file`, `delete_vault_file`
-  - `features/smart-connections/index.ts`: `search_vault_smart`
+  - `features/semantic-search/index.ts`: `search_vault_smart`
   - `features/templates/index.ts`: `execute_template`
   - `features/fetch/index.ts`: `fetch`（Web ページ取得。Local REST API とは無関係）
   - `features/prompts/index.ts`: ツールではなく MCP prompts。vault の `Prompts/` 直下でタグ `mcp-tools-prompt` を持つ `.md` を列挙・実行する。
@@ -135,6 +135,18 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 
 対応: `ApiNoteJson.frontmatter` を `Record<string, unknown>` にし、`ApiVaultFileResponse` は `ApiNoteJson` の別名にした。Local REST API の `getFileMetadataObject` は Obsidian のパース結果から `position` を消したものをそのまま返す（frontmatter が無ければ `{}`）ので、値はリスト・数値・真偽値・null・入れ子オブジェクトになりうる。常にあるのは `content` / `frontmatter` / `path` / `stat` / `tags`（frontmatter のリスト tags とインラインタグを `#` を外して合わせたもの）。frontmatter の値を読む側は型を確かめる（`prompts/index.ts` の `description`）。単体テストは `features/local-rest-api/noteJson.test.ts` と `makeRequest.test.ts`。
 
+### 意味検索は自前の埋め込み索引で行う（Smart Connections は使わない）
+
+背景: Smart Connections で任意の埋め込みモデル（API）を使うには Pro（年 299 ドル）が要り、無料のローカルモデル（multilingual-e5-small、512 トークン、ノート全体の埋め込みは実質冒頭数百字）では日本語の検索が弱かった。2026-10 に置き換えた。設計は `docs/superpowers/specs/2026-10-03-semantic-search-design.md`、実装計画は `docs/superpowers/plans/2026-10-03-semantic-search.md`。
+
+- 実体は `packages/obsidian-plugin/src/features/semantic-search/`。見出しごとの節（最大 `maxChunkChars` 字、既定 4000）を `ノート名 > H1 > H2` の前置き付きで埋め込み、`.obsidian/plugins/mcp-tools/semantic-index/` の 32 個の shard（`MCPIDX01` 形式、Float32、正規化済み）と `manifest.json` に保存する。検索は全件の内積の総当たり（2 万節 × 1024 次元で十数 ms）。
+- プロバイダは Cohere（`embed-v5.0-fast` 既定、`input_type` で検索語と文書を区別）と OpenAI 互換 `/embeddings`（前置き文字列で区別）。API キーは Obsidian の `SecretStorage` に置き、`data.json` には ID だけを書く。MCP サーバにはキーを渡さない。
+- モデルの識別子（プロバイダ・モデル・次元・前置き・節の上限・`CHUNKER_VERSION`）が変わったら索引を捨てて作り直す。分割規則を変えたら `chunker.ts` の `CHUNKER_VERSION` を上げる。
+- 最初の索引作りは設定画面のボタンを押したときだけ始まる（vault 全体をクラウドに送るので）。以後は `metadataCache` の `changed` と vault の `delete` / `rename` を 10 秒まとめて差分更新し、送る文字列のハッシュが同じ節は前のベクトルを使い回す。
+- 失敗: 401/403 は停止して Notice、429/5xx/通信エラーは 2・8・30 秒で再試行してから停止し 5 分後に再開、400 はノート単位に送り直して原因のノートだけ「失敗」として記録する（更新されるまで再送しない）。
+- `/search/smart` は未設定・空なら 503、検索語の埋め込み失敗は 502（本文 `{ message }`）。応答に `index`（状態）が付き、MCP ツールは `ready` 以外なら先頭に警告を 1 行付ける。`limit` は 1〜50 の整数、既定 20。
+- 単体テストは `packages/obsidian-plugin/src/features/semantic-search/**/*.test.ts`。実機は `bun run verify:semantic`（後述）。
+
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
 vault 内パスを URL パスに埋め込む処理を書く・直すときは、必ず `/` で分割してから各セグメントを `encodeURIComponent` し、`/` で再結合する。パス全体に `encodeURIComponent` をかけてはならない（`/` が `%2F` になり Local REST API がファイルとして解決しない）。エンコードなしで埋め込むのも不可（スペース・`#`・`?`・`%` で壊れる）。`makeRequest` はエンコードしないので、呼び出し側でヘルパーを通す。
@@ -181,9 +193,9 @@ cd packages/mcp-server && bun run build:windows
 cd packages/mcp-server && bun test
 ```
 
-テストは `packages/mcp-server` にしかない（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
+テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 110 件中 4 件が失敗する（2026-09-24 確認、上流から引き継いだ不整合）。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
+現状 mcp-server は 117 件中 4 件が失敗する（2026-10-03 確認、上流から引き継いだ不整合）。obsidian-plugin の 86 件はすべて通る。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -249,15 +261,17 @@ cd packages/mcp-server && bun run build:windows && bun run verify:paths
 
 `scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-24 時点で 179/179 PASS。
 
+意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
+
 ## バージョン整合
 
 | ファイル | 役割 |
 |---|---|
 | `package.json`（ルート） | 唯一の入力。`version` を `bun.config.ts`（`GITHUB_DOWNLOAD_URL` の埋め込み）、`packages/mcp-server/src/features/version/index.ts`（`--version` の出力）、`scripts/zip.ts`（zip 名）が読む |
-| `manifest.json`（ルート） | Obsidian が読む。`version` は package.json と同値に保つ。`minAppVersion` は `0.15.0` |
+| `manifest.json`（ルート） | Obsidian が読む。`version` は package.json と同値に保つ。`minAppVersion` は `1.11.4`（意味検索の API キーを `SecretStorage` に置くため） |
 | `versions.json`（ルート） | `{ "<plugin version>": "<minAppVersion>" }` の対応表。Obsidian のプラグイン更新判定用 |
 
 - `bun run version [patch|minor|major]`（`scripts/version.ts`）が package.json → manifest.json → versions.json の順に更新し、`git add` / `commit` / `tag` / `push` / `push origin <tag>` まで一括で行う。作業ツリーが clean で `main` にいないと止まる（`FORCE=true` で回避）。タグ push で `.github/workflows/release.yml` が走り、全プラットフォームのバイナリと plugin zip を GitHub Release に上げる。push 先はどちらも `origin`（このフォーク）。
 - プラグインは起動時に `bin/mcp-server.exe --version` の出力と `manifest.version` を semver 比較し、サーバが古ければ `outdated` と表示する（`services/status.ts`）。自前ビルドのバイナリでもルート package.json の版が焼き込まれるので、プラグインとサーバを同じコミットからビルドすれば一致する。
 - `features/core/index.ts` の `new Server({ name: "obsidian-mcp-tools", version: "0.1.0" })` は固定文字列で、package.json と同期していない。MCP クライアントに見える版はこれ。
-- Local REST API 側: プラグインは npm パッケージ `obsidian-local-rest-api` ^2.5.4（lock: 2.5.4）を `getAPI` と型のためだけに依存している。**実行時に必要な Local REST API の版はコード上どこにも検査・固定されていない**。README の「Obsidian v1.7.7 以上」も manifest の `minAppVersion` には反映されていない（`0.15.0` のまま）。
+- Local REST API 側: プラグインは npm パッケージ `obsidian-local-rest-api` ^2.5.4（lock: 2.5.4）を `getAPI` と型のためだけに依存している。**実行時に必要な Local REST API の版はコード上どこにも検査・固定されていない**。manifest の `minAppVersion` は `1.11.4`。

@@ -8,7 +8,7 @@ A secure Model Context Protocol (MCP) server that provides authenticated access 
 
 - Read and write vault files via `note://` URIs
 - Access file metadata and frontmatter
-- Semantic search through Smart Connections
+- Semantic search over the plugin's embedding index
 - Template execution via Templater
 
 ### Security

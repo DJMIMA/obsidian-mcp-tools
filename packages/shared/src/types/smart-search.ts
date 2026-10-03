@@ -1,5 +1,4 @@
 import { type } from "arktype";
-import { SmartSearchFilter } from "./plugin-smart-connections";
 
 export const SEARCH_LIMIT_DEFAULT = 20;
 export const SEARCH_LIMIT_MAX = 50;
@@ -42,9 +41,3 @@ const searchResponse = type({
   "index?": searchIndexStatus,
 });
 export type SearchResponse = typeof searchResponse.infer;
-
-/** Smart Connections' filter format. Removed with the rest of the Smart Connections code in Task 12. */
-export const searchParameters = type({
-  query: "string",
-  filter: SmartSearchFilter,
-});

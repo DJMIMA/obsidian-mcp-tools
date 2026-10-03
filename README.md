@@ -29,7 +29,7 @@ When you install this plugin, it will help you set up both components. The MCP s
 When connected to an MCP client like Claude Desktop, this plugin enables:
 
 - **Vault Access**: Allows AI assistants to read and reference your notes while maintaining your vault's security [^4]
-- **Semantic Search**: AI assistants can search your vault based on meaning and context, not just keywords [^5]
+- **Semantic Search**: AI assistants can search your vault based on meaning and context, not just keywords, using an embedding model you choose (Cohere or any OpenAI-compatible API) [^5]
 - **Template Integration**: Execute Obsidian templates through AI interactions, with dynamic parameters and content generation [^6]
 
 All features require an MCP-compatible client like Claude Desktop, as this plugin provides the server component that enables these integrations. The plugin does not modify Obsidian's functionality directly - instead, it creates a secure bridge that allows AI applications to work with your vault in powerful ways.
@@ -45,7 +45,6 @@ All features require an MCP-compatible client like Claude Desktop, as this plugi
 ### Recommended
 
 - [Templater](https://silentvoid13.github.io/Templater/) plugin for enhanced template functionality
-- [Smart Connections](https://smartconnections.app/) plugin for semantic search capabilities
 
 ## Installation
 
@@ -226,5 +225,5 @@ See [GitHub Releases](https://github.com/jacksteamdev/obsidian-mcp-tools/release
 [^2]: For more information about the Model Context Protocol, see [MCP Introduction](https://modelcontextprotocol.io/introduction)
 [^3]: For a list of available MCP Clients, see [MCP Example Clients](https://modelcontextprotocol.io/clients)
 [^4]: Requires Obsidian plugin Local REST API
-[^5]: Requires Obsidian plugin Smart Connections
+[^5]: Requires an embedding API key (or a local OpenAI-compatible server) set in the MCP Tools plugin settings
 [^6]: Requires Obsidian plugin Templater
