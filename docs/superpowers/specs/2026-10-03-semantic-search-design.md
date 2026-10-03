@@ -269,7 +269,7 @@ semanticSearch: {
 - `packages/shared/src/types/plugin-smart-connections.ts` と `types/index.ts` の `SmartConnections` の export。
 - `packages/shared/src/types/smart-search.ts` の `searchParameters`（Smart Connections の filter 形式への変換）。`jsonSearchRequest` と `SearchResponse` は新しい形（`limit` の制限、`index`）に書き換えて残す。
 - `packages/shared/src/types/plugin-local-rest-api.ts` の `ApiSmartSearchResponse` に `index` を足す。
-- `packages/obsidian-plugin/src/shared/index.ts` の `loadSmartSearchAPI`、`Dependencies["smart-connections"]`、依存一覧の Smart Connections。
+- `packages/obsidian-plugin/src/shared/index.ts` の `loadSmartSearchAPI` と `Dependencies["smart-connections"]`。`loadDependencies()` の一覧の `"smart-connections"` と `merge()` 内の `loadSmartSearchAPI(plugin)` も消す。これで設定画面の Dependencies 欄から「Smart Connections is installed」の行が消え、Local REST API と Templater の 2 行になる。意味検索の状態は Dependencies 欄ではなく、新しい「Semantic search」欄に出す。
 - `packages/obsidian-plugin/src/features/mcp-server-install/types.ts` の `smart-connections` の型宣言。
 - `main.ts` の `handleSearchRequest`（`features/semantic-search/` に移して書き直す）。
 - 文書: `README.md`（48 行目、229 行目の脚注）、`packages/mcp-server/README.md`、`packages/obsidian-plugin/README.md`、`docs/features/mcp-server-install.md`、`CLAUDE.md`（構成・ツール一覧・`minAppVersion` の記述）。
