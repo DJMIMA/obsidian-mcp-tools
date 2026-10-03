@@ -24,6 +24,19 @@ describe("withDefaults", () => {
   });
 });
 
+describe("withDefaults guards numbers", () => {
+  // A cleared number field arrives as null; 0 or a negative step would make chunking or batching loop forever.
+  test("replaces unusable numbers with the defaults", () => {
+    const s = withDefaults({ maxChunkChars: 0, openaiCompatible: { batchSize: null, dimensions: 0 } } as never);
+    expect(s.maxChunkChars).toBe(4000);
+    expect(s.openaiCompatible.batchSize).toBe(64);
+    expect(s.openaiCompatible.dimensions).toBeNull();
+    expect(withDefaults({ maxChunkChars: 150 } as never).maxChunkChars).toBe(4000);
+    expect(withDefaults({ maxChunkChars: 2500.7 } as never).maxChunkChars).toBe(2500);
+    expect(withDefaults({ openaiCompatible: { batchSize: -3 } } as never).openaiCompatible.batchSize).toBe(64);
+  });
+});
+
 describe("fingerprint", () => {
   const a = clone(DEFAULT_SEMANTIC_SEARCH_SETTINGS);
 

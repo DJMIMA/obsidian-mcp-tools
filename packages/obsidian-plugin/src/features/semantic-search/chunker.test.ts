@@ -91,6 +91,9 @@ describe("splitText", () => {
   test("text within the limit is returned as is", () => {
     expect(splitText("short", 10)).toEqual(["short"]);
   });
+  test("a limit below 1 returns the text whole instead of looping", () => {
+    expect(splitText("abc\n\ndef", 0)).toEqual(["abc\n\ndef"]);
+  });
   test("a single paragraph over the limit is cut at the limit", () => {
     const text = "# H\n" + "x".repeat(25);
     const parts = splitText(text, 10);

@@ -5,7 +5,8 @@ export const COHERE_EMBED_URL = "https://api.cohere.com/v2/embed";
 export const COHERE_BATCH_SIZE = 96;
 
 export interface CohereOptions {
-  apiKey: string;
+  /** Read on every call, so a key replaced in Obsidian's keychain is used at once. */
+  apiKey: () => string;
   model: string;
   dimension: number;
   http: HttpFn;
@@ -23,7 +24,7 @@ export function createCohereProvider(options: CohereOptions): EmbeddingProvider 
         url: COHERE_EMBED_URL,
         method: "POST",
         headers: {
-          Authorization: `Bearer ${options.apiKey}`,
+          Authorization: `Bearer ${options.apiKey()}`,
           "Content-Type": "application/json",
           Accept: "application/json",
         },

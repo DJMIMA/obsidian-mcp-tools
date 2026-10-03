@@ -1,6 +1,18 @@
 import type { HttpFn, HttpRequest, HttpResponse } from "./types";
 
-export type EmbeddingErrorKind = "auth" | "rate-limit" | "server" | "network" | "bad-request" | "bad-response";
+/**
+ * "bad-request": this request's content was rejected (400, 413, 422), so it is resent note by note.
+ * "fatal": the request itself is wrong (404 model or URL, 405, other 4xx), so the run stops.
+ */
+export type EmbeddingErrorKind =
+  | "auth"
+  | "rate-limit"
+  | "timeout"
+  | "server"
+  | "network"
+  | "bad-request"
+  | "fatal"
+  | "bad-response";
 
 export class EmbeddingError extends Error {
   constructor(
@@ -13,7 +25,7 @@ export class EmbeddingError extends Error {
   }
 
   get retryable(): boolean {
-    return this.kind === "rate-limit" || this.kind === "server" || this.kind === "network";
+    return this.kind === "rate-limit" || this.kind === "timeout" || this.kind === "server" || this.kind === "network";
   }
 }
 
@@ -31,8 +43,12 @@ export function errorFromResponse(provider: string, response: HttpResponse): Emb
   const message = `${provider} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
   if (response.status === 401 || response.status === 403) return new EmbeddingError(message, "auth");
   if (response.status === 429) return new EmbeddingError(message, "rate-limit", parseRetryAfter(response.headers));
+  if (response.status === 408) return new EmbeddingError(message, "timeout", parseRetryAfter(response.headers));
   if (response.status >= 500) return new EmbeddingError(message, "server", parseRetryAfter(response.headers));
-  return new EmbeddingError(message, "bad-request");
+  if (response.status === 400 || response.status === 413 || response.status === 422) {
+    return new EmbeddingError(message, "bad-request");
+  }
+  return new EmbeddingError(message, "fatal");
 }
 
 /** Sends the request and turns a missing response or a non-2xx status into an EmbeddingError. */

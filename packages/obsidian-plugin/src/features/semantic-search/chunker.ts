@@ -81,7 +81,7 @@ export function chunkNote(input: ChunkInput): Chunk[] {
 
 /** Splits text into parts of at most `max` characters, preferring blank-line paragraph boundaries. */
 export function splitText(text: string, max: number): string[] {
-  if (text.length <= max) return [text];
+  if (text.length <= max || !(max >= 1)) return [text];
   const parts: string[] = [];
   let current = "";
   const flush = () => {

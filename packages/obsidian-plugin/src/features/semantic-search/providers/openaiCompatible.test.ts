@@ -15,7 +15,7 @@ function stub(responses: HttpResponse[]) {
 const ok = (body: unknown): HttpResponse => ({ status: 200, headers: {}, text: JSON.stringify(body) });
 const options = {
   baseUrl: "http://localhost:11434/v1/",
-  apiKey: null,
+  apiKey: () => null,
   model: "e5",
   dimensions: null,
   queryPrefix: "query: ",
@@ -53,10 +53,21 @@ describe("OpenAI-compatible provider", () => {
 
   test("sends dimensions and the key when set, and the query prefix for queries", async () => {
     const { http, requests } = stub([ok({ data: [{ index: 0, embedding: [1, 2] }], usage: { total_tokens: 3 } })]);
-    const result = await createOpenAiCompatibleProvider({ ...options, apiKey: "k", dimensions: 2, http }).embed(["q"], "query");
+    const result = await createOpenAiCompatibleProvider({ ...options, apiKey: () => "k", dimensions: 2, http }).embed(["q"], "query");
     expect(requests[0].headers.Authorization).toBe("Bearer k");
     expect(JSON.parse(requests[0].body)).toMatchObject({ input: ["query: q"], dimensions: 2 });
     expect(result.tokens).toBe(3);
+  });
+
+  test("reads the API key on every call", async () => {
+    const reply = ok({ data: [{ index: 0, embedding: [1, 2] }] });
+    const { http, requests } = stub([reply, reply]);
+    let key: string | null = null;
+    const provider = createOpenAiCompatibleProvider({ ...options, apiKey: () => key, http });
+    await provider.embed(["a"], "document");
+    key = "k2";
+    await provider.embed(["a"], "document");
+    expect(requests.map((r) => r.headers.Authorization)).toEqual([undefined, "Bearer k2"]);
   });
 
   test("vectors of different lengths in one response are a bad response", async () => {

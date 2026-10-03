@@ -11,6 +11,16 @@ describe("errorFromResponse", () => {
     expect(errorFromResponse("X", response(503)).kind).toBe("server");
     expect(errorFromResponse("X", response(400)).kind).toBe("bad-request");
   });
+  // Only errors about the content of one request are worth resending note by note.
+  test("only 400, 413 and 422 count as a bad request; other 4xx stop the run; 408 is retried", () => {
+    expect(errorFromResponse("X", response(413)).kind).toBe("bad-request");
+    expect(errorFromResponse("X", response(422)).kind).toBe("bad-request");
+    expect(errorFromResponse("X", response(404)).kind).toBe("fatal");
+    expect(errorFromResponse("X", response(405)).kind).toBe("fatal");
+    expect(errorFromResponse("X", response(404)).retryable).toBe(false);
+    expect(errorFromResponse("X", response(408)).retryable).toBe(true);
+  });
+
   test("only rate limits, server errors and network failures are retryable", () => {
     expect(errorFromResponse("X", response(429)).retryable).toBe(true);
     expect(errorFromResponse("X", response(500)).retryable).toBe(true);

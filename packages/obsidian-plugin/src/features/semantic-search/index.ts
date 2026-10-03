@@ -150,7 +150,8 @@ export class SemanticSearchFeature {
   }
 
   estimate(draft: SemanticSearchSettings): Promise<IndexEstimate> {
-    return estimateIndex(this.vault, draft.excludeFolders, draft.maxChunkChars);
+    const settings = withDefaults(draft);
+    return estimateIndex(this.vault, settings.excludeFolders, settings.maxChunkChars);
   }
 
   status(): FeatureStatus {

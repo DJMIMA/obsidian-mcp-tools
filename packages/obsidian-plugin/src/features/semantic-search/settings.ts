@@ -39,15 +39,29 @@ export const DEFAULT_SEMANTIC_SEARCH_SETTINGS: SemanticSearchSettings = {
   maxChunkChars: 4000,
 };
 
-/** Fills fields missing from stored settings (an older data.json) with the defaults. */
+/** A whole number at least `min`, or null when `value` is not one (a cleared field arrives as null). */
+function atLeast(value: unknown, min: number): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= min ? Math.floor(value) : null;
+}
+
+/**
+ * Fills fields missing from stored settings (an older data.json) with the defaults,
+ * and replaces numbers that would make chunking or batching loop forever.
+ */
 export function withDefaults(stored: Partial<SemanticSearchSettings> | undefined): SemanticSearchSettings {
   const d = DEFAULT_SEMANTIC_SEARCH_SETTINGS;
+  const openai = { ...d.openaiCompatible, ...stored?.openaiCompatible };
   return {
     ...d,
     ...stored,
     cohere: { ...d.cohere, ...stored?.cohere },
-    openaiCompatible: { ...d.openaiCompatible, ...stored?.openaiCompatible },
+    openaiCompatible: {
+      ...openai,
+      batchSize: atLeast(openai.batchSize, 1) ?? d.openaiCompatible.batchSize,
+      dimensions: atLeast(openai.dimensions, 1),
+    },
     excludeFolders: [...(stored?.excludeFolders ?? d.excludeFolders)],
+    maxChunkChars: atLeast(stored?.maxChunkChars, 200) ?? d.maxChunkChars,
   };
 }
 

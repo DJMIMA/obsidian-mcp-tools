@@ -15,7 +15,7 @@ export function createProvider(
 ): EmbeddingProvider {
   if (settings.provider === "cohere") {
     return createCohereProvider({
-      apiKey: getSecret(settings.cohere.apiKeySecretId) ?? "",
+      apiKey: () => getSecret(settings.cohere.apiKeySecretId) ?? "",
       model: settings.cohere.model,
       dimension: settings.cohere.dimension,
       http,
@@ -24,7 +24,7 @@ export function createProvider(
   const o = settings.openaiCompatible;
   return createOpenAiCompatibleProvider({
     baseUrl: o.baseUrl,
-    apiKey: o.apiKeySecretId ? getSecret(o.apiKeySecretId) : null,
+    apiKey: () => (o.apiKeySecretId ? getSecret(o.apiKeySecretId) : null),
     model: o.model,
     dimensions: o.dimensions,
     queryPrefix: o.queryPrefix,

@@ -287,6 +287,17 @@ describe("Indexer failures", () => {
     expect(t.scheduler.pending(RESUME_AFTER_MS)).toHaveLength(0);
   });
 
+  test("a request-level error such as 404 pauses instead of marking every note failed", async () => {
+    const t = setup();
+    t.vault.set("a.md", "# A\na");
+    t.vault.set("b.md", "# B\nb");
+    t.provider.failures = [new EmbeddingError("HTTP 404: model not found", "fatal")];
+    await t.indexer.build();
+    expect(t.indexer.status()).toMatchObject({ state: "paused", reason: "HTTP 404: model not found" });
+    expect(t.store.stats()).toEqual({ notes: 0, failedNotes: 0, chunks: 0 });
+    expect(t.provider.calls).toHaveLength(1);
+  });
+
   test("rate limiting waits for Retry-After and then succeeds", async () => {
     const t = setup();
     t.vault.set("a.md", "# A\na");

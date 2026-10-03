@@ -3,7 +3,8 @@ import type { EmbedKind, EmbedResult, EmbeddingProvider, HttpFn } from "./types"
 
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
-  apiKey: string | null;
+  /** Read on every call; null sends no Authorization header. */
+  apiKey: () => string | null;
   model: string;
   dimensions: number | null;
   queryPrefix: string;
@@ -27,7 +28,8 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
       }
       const prefix = kind === "query" ? options.queryPrefix : options.documentPrefix;
       const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
-      if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
+      const apiKey = options.apiKey();
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
       const body: Record<string, unknown> = {
         model: options.model,
         input: texts.map((text) => prefix + text),

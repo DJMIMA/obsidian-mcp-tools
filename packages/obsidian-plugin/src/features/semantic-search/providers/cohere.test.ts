@@ -19,7 +19,7 @@ describe("Cohere provider", () => {
     const { http, requests } = stub([
       ok({ embeddings: { float: [[1, 2], [3, 4]] }, meta: { billed_units: { input_tokens: 12 } } }),
     ]);
-    const provider = createCohereProvider({ apiKey: "k", model: "embed-v5.0-fast", dimension: 2, http });
+    const provider = createCohereProvider({ apiKey: () => "k", model: "embed-v5.0-fast", dimension: 2, http });
     const result = await provider.embed(["a", "b"], "document");
     expect(requests[0].url).toBe("https://api.cohere.com/v2/embed");
     expect(requests[0].headers.Authorization).toBe("Bearer k");
@@ -35,15 +35,25 @@ describe("Cohere provider", () => {
     expect(result.tokens).toBe(12);
   });
 
+  test("reads the API key on every call, so a replaced key is used at once", async () => {
+    const { http, requests } = stub([ok({ embeddings: { float: [[1, 2]] } }), ok({ embeddings: { float: [[1, 2]] } })]);
+    let key = "old";
+    const provider = createCohereProvider({ apiKey: () => key, model: "m", dimension: 2, http });
+    await provider.embed(["a"], "document");
+    key = "new";
+    await provider.embed(["a"], "document");
+    expect(requests.map((r) => r.headers.Authorization)).toEqual(["Bearer old", "Bearer new"]);
+  });
+
   test("sends queries as search_query", async () => {
     const { http, requests } = stub([ok({ embeddings: { float: [[1, 2]] } })]);
-    await createCohereProvider({ apiKey: "k", model: "m", dimension: 2, http }).embed(["q"], "query");
+    await createCohereProvider({ apiKey: () => "k", model: "m", dimension: 2, http }).embed(["q"], "query");
     expect(JSON.parse(requests[0].body).input_type).toBe("search_query");
   });
 
   test("refuses more than 96 texts and sends nothing for none", async () => {
     const { http, requests } = stub([]);
-    const provider = createCohereProvider({ apiKey: "k", model: "m", dimension: 2, http });
+    const provider = createCohereProvider({ apiKey: () => "k", model: "m", dimension: 2, http });
     expect(provider.batchSize).toBe(96);
     await expect(provider.embed(new Array(97).fill("x"), "document")).rejects.toThrow("at most 96");
     expect(await provider.embed([], "document")).toEqual({ vectors: [], tokens: 0 });
@@ -53,18 +63,18 @@ describe("Cohere provider", () => {
   test("a response with the wrong count or dimension is a bad response", async () => {
     const short = stub([ok({ embeddings: { float: [[1, 2]] } })]);
     await expect(
-      createCohereProvider({ apiKey: "k", model: "m", dimension: 2, http: short.http }).embed(["a", "b"], "document"),
+      createCohereProvider({ apiKey: () => "k", model: "m", dimension: 2, http: short.http }).embed(["a", "b"], "document"),
     ).rejects.toMatchObject({ kind: "bad-response" });
     const wide = stub([ok({ embeddings: { float: [[1, 2, 3]] } })]);
     await expect(
-      createCohereProvider({ apiKey: "k", model: "m", dimension: 2, http: wide.http }).embed(["a"], "document"),
+      createCohereProvider({ apiKey: () => "k", model: "m", dimension: 2, http: wide.http }).embed(["a"], "document"),
     ).rejects.toMatchObject({ kind: "bad-response" });
   });
 
   test("HTTP errors are classified", async () => {
     const { http } = stub([{ status: 401, headers: {}, text: "invalid api token" }]);
     await expect(
-      createCohereProvider({ apiKey: "bad", model: "m", dimension: 2, http }).embed(["a"], "document"),
+      createCohereProvider({ apiKey: () => "bad", model: "m", dimension: 2, http }).embed(["a"], "document"),
     ).rejects.toMatchObject({ kind: "auth" });
   });
 });
