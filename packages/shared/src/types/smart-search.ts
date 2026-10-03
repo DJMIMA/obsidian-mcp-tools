@@ -1,33 +1,50 @@
 import { type } from "arktype";
-import { SmartConnections } from "shared";
+import { SmartSearchFilter } from "./plugin-smart-connections";
 
-const searchRequest = type({
+export const SEARCH_LIMIT_DEFAULT = 20;
+export const SEARCH_LIMIT_MAX = 50;
+
+export const searchRequest = type({
   query: type("string>0").describe("A search phrase for semantic search"),
   "filter?": {
     "folders?": type("string[]").describe(
-      'An array of folder names to include. For example, ["Public", "Work"]',
+      'Only return results whose vault path starts with one of these prefixes, e.g. ["Public/", "Work/"]. Matching is by string prefix, so "Work" also matches "Workshop/"',
     ),
     "excludeFolders?": type("string[]").describe(
-      'An array of folder names to exclude. For example, ["Private", "Archive"]',
+      'Drop results whose vault path starts with one of these prefixes, e.g. ["Private/", "Archive/"]',
     ),
-    "limit?": type("number>0").describe(
-      "The maximum number of results to return",
+    "limit?": type("1 <= number.integer <= 50").describe(
+      "an integer from 1 to 50 (default 20), the maximum number of results to return",
     ),
   },
 });
 export const jsonSearchRequest = type("string.json.parse").to(searchRequest);
 
+export const searchIndexStatus = type({
+  state: "'unconfigured' | 'empty' | 'building' | 'paused' | 'ready'",
+  "reason?": "string",
+  indexedNotes: "number",
+  totalNotes: "number",
+  failedNotes: "number",
+  model: "string",
+});
+export type SearchIndexStatus = typeof searchIndexStatus.infer;
+
+export const searchResult = type({
+  path: "string",
+  text: "string",
+  score: "number",
+  breadcrumbs: "string",
+});
+
 const searchResponse = type({
-  results: type({
-    path: "string",
-    text: "string",
-    score: "number",
-    breadcrumbs: "string",
-  }).array(),
+  results: searchResult.array(),
+  "index?": searchIndexStatus,
 });
 export type SearchResponse = typeof searchResponse.infer;
 
+/** Smart Connections' filter format. Removed with the rest of the Smart Connections code in Task 12. */
 export const searchParameters = type({
   query: "string",
-  filter: SmartConnections.SmartSearchFilter,
+  filter: SmartSearchFilter,
 });

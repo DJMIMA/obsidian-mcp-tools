@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { searchIndexStatus, searchResult } from "./smart-search";
 
 /**
  * Error response from the API
@@ -115,12 +116,7 @@ export const ApiSimpleSearchResponse = type({
  * Content-Type: application/json
  * Used in ApiSearchResponse
  */
-export const ApiSmartSearchResult = type({
-  path: "string",
-  text: "string",
-  score: "number",
-  breadcrumbs: "string",
-});
+export const ApiSmartSearchResult = searchResult;
 
 /**
  * Response from semantic search containing list of matching results
@@ -129,6 +125,7 @@ export const ApiSmartSearchResult = type({
  */
 export const ApiSmartSearchResponse = type({
   results: ApiSmartSearchResult.array(),
+  "index?": searchIndexStatus,
 });
 
 /**

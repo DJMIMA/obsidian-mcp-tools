@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerFetchTool } from "../fetch";
 import { registerLocalRestApiTools } from "../local-rest-api";
 import { setupObsidianPrompts } from "../prompts";
-import { registerSmartConnectionsTools } from "../smart-connections";
+import { registerSemanticSearchTools } from "../semantic-search";
 import { registerTemplaterTools } from "../templates";
 import {
   CallToolRequestSchema,
@@ -49,7 +49,7 @@ export class ObsidianMcpServer {
 
     registerFetchTool(this.tools, this.server);
     registerLocalRestApiTools(this.tools, this.server);
-    registerSmartConnectionsTools(this.tools);
+    registerSemanticSearchTools(this.tools);
     registerTemplaterTools(this.tools);
 
     this.server.setRequestHandler(ListToolsRequestSchema, this.tools.list);
