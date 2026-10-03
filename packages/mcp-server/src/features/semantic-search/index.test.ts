@@ -32,5 +32,7 @@ describe("search_vault_smart arguments", () => {
     const tool = tools.list().tools.find((t) => t.name === "search_vault_smart");
     expect(JSON.stringify(tool?.inputSchema)).toContain('"maximum":50');
     expect(tool?.description).toContain("limit defaults to 20");
+    expect(tool?.description).toContain("at most 2 sections from one note");
+    expect(JSON.stringify(tool?.inputSchema)).toContain("maxPerNote");
   });
 });

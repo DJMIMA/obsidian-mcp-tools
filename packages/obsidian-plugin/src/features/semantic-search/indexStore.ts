@@ -39,6 +39,8 @@ export interface SearchHit {
 
 export interface SearchOptions {
   limit: number;
+  /** At most this many sections from one note; the remaining slots go to other notes. No cap when omitted. */
+  maxPerNote?: number;
   folders?: string[];
   excludeFolders?: string[];
 }
@@ -154,7 +156,17 @@ export class IndexStore {
       }
     }
     hits.sort((a, b) => b.score - a.score);
-    return hits.slice(0, options.limit);
+    const maxPerNote = options.maxPerNote ?? Infinity;
+    const perNote = new Map<string, number>();
+    const out: SearchHit[] = [];
+    for (const hit of hits) {
+      if (out.length >= options.limit) break;
+      const count = perNote.get(hit.path) ?? 0;
+      if (count >= maxPerNote) continue;
+      perNote.set(hit.path, count + 1);
+      out.push(hit);
+    }
+    return out;
   }
 
   shardEntries(i: number): [string, NoteRecord][] {

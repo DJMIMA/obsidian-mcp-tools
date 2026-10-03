@@ -1,6 +1,7 @@
 import { type } from "arktype";
 import {
   SEARCH_LIMIT_DEFAULT,
+  SEARCH_MAX_PER_NOTE_DEFAULT,
   jsonSearchRequest,
   searchRequest,
   type SearchIndexStatus,
@@ -48,6 +49,7 @@ export async function handleSearch(body: unknown, deps: SearchDeps): Promise<Han
   const embedded = deps.now();
   const hits = deps.search(vector, {
     limit: request.filter?.limit ?? SEARCH_LIMIT_DEFAULT,
+    maxPerNote: request.filter?.maxPerNote ?? SEARCH_MAX_PER_NOTE_DEFAULT,
     folders: request.filter?.folders,
     excludeFolders: request.filter?.excludeFolders,
   });

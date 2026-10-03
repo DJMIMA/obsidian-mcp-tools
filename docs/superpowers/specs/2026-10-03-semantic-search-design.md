@@ -18,7 +18,7 @@
 |---|---|
 | 範囲 | MCP の `search_vault_smart` の裏側だけを置き換える。Obsidian 内の UI（関連ノートのサイドバー等）は作らない。Smart Connections を呼ぶコードは消す。Smart Connections 本体を vault に残すかは利用者の自由で、互いに干渉しない |
 | 接続方式 | Cohere 専用の接続と、OpenAI 互換の `/v1/embeddings`（OpenAI、Ollama、LM Studio、Gemini の互換エンドポイント等）の 2 つ。内部は「文書用」と「検索語用」を区別する共通の口にし、後から接続方式を足せるようにする |
-| 結果の単位 | 見出しごと（節ごと）。同じノートの別の節が複数並ぶことを許す |
+| 結果の単位 | 見出しごと（節ごと）。1 ノートから返す節は既定 2 件まで（`filter.maxPerNote`、1〜50）。上限なしだと 1 つの長いノートの節が上位を埋め、ほかの関連ノートが押し出された（2026-10-03 の評価で追加） |
 | 索引を作る場所 | Obsidian プラグインの中（A 案）。MCP サーバ側は窓口のまま |
 | `limit` | 1〜50 の整数、既定 20（/learn のサブエージェントが実際に 20 で呼んでいるため）。範囲外は引数検証エラーとして `isError` で理由を返す |
 
@@ -163,14 +163,14 @@ semantic-index/
 
 ### リクエスト
 
-今と同じ `{ query: string, filter?: { folders?: string[], excludeFolders?: string[], limit?: number } }`。MCP サーバは本文を JSON 文字列で送るので、プラグインは今の `jsonSearchRequest` と同じく文字列を JSON として解析してから検証する。`limit` は 1〜50 の整数、既定 20。不正なら 400。
+`{ query: string, filter?: { folders?: string[], excludeFolders?: string[], limit?: number, maxPerNote?: number } }`。MCP サーバは本文を JSON 文字列で送るので、プラグインは今の `jsonSearchRequest` と同じく文字列を JSON として解析してから検証する。`limit` は 1〜50 の整数、既定 20。不正なら 400。
 
 ### 手順
 
 1. 状態が `unconfigured` なら 503、索引にチャンクが 1 つも無ければ 503。
 2. 検索語を `kind: "query"` で埋め込む。失敗したら 502（本文にプロバイダの応答の要約。再試行はしない）。
 3. 全チャンクと内積を取る。`folders` があればそのどれかで始まるパスだけ、`excludeFolders` のどれかで始まるパスは除く。
-4. 点数の高い順に `limit` 件を返す。
+4. 点数の高い順に、1 ノートあたり `maxPerNote` 件（既定 2）までに抑えながら `limit` 件を返す。
 
 所要時間（埋め込みと総当たりのそれぞれ）をログに出す。
 

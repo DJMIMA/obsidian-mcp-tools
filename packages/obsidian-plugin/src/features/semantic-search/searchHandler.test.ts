@@ -28,7 +28,7 @@ function deps(overrides: Partial<SearchDeps> = {}) {
 }
 
 describe("handleSearch", () => {
-  test("returns results and the index status, with limit 20 by default", async () => {
+  test("returns results and the index status, with limit 20 and 2 sections per note by default", async () => {
     const { deps: d, searches } = deps();
     const response = await handleSearch(JSON.stringify({ query: "alpha" }), d);
     expect(response).toEqual({
@@ -38,13 +38,13 @@ describe("handleSearch", () => {
         index: ready,
       },
     });
-    expect(searches[0]).toEqual({ limit: 20, folders: undefined, excludeFolders: undefined });
+    expect(searches[0]).toEqual({ limit: 20, maxPerNote: 2, folders: undefined, excludeFolders: undefined });
   });
 
   test("passes the filters through and accepts an already-parsed body", async () => {
     const { deps: d, searches } = deps();
-    await handleSearch({ query: "x", filter: { limit: 5, folders: ["日記/"], excludeFolders: ["My Notes/"] } }, d);
-    expect(searches[0]).toEqual({ limit: 5, folders: ["日記/"], excludeFolders: ["My Notes/"] });
+    await handleSearch({ query: "x", filter: { limit: 5, maxPerNote: 1, folders: ["日記/"], excludeFolders: ["My Notes/"] } }, d);
+    expect(searches[0]).toEqual({ limit: 5, maxPerNote: 1, folders: ["日記/"], excludeFolders: ["My Notes/"] });
   });
 
   test("rejects a bad request with 400 and the reason", async () => {
@@ -55,6 +55,9 @@ describe("handleSearch", () => {
     expect(badLimit.status).toBe(400);
     expect(JSON.stringify(badLimit.body)).toContain("an integer from 1 to 50");
     expect(JSON.stringify(badLimit.body)).toContain("(was 51)");
+    const badCap = await handleSearch(JSON.stringify({ query: "x", filter: { maxPerNote: 0 } }), d);
+    expect(badCap.status).toBe(400);
+    expect(JSON.stringify(badCap.body)).toContain("maxPerNote");
   });
 
   test("503 when not configured or nothing is indexed yet", async () => {

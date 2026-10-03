@@ -9,7 +9,7 @@ export function registerSemanticSearchTools(tools: ToolRegistry) {
       name: '"search_vault_smart"',
       arguments: searchRequest,
     }).describe(
-      "Semantic search over the vault using the embedding index built by the MCP Tools Obsidian plugin (the embedding provider and model are configured in the plugin settings). Finds sections whose meaning is close to the query even when they share no words with it. Results are per heading section, so one note can appear more than once. Returns { results: [{ path, text, score, breadcrumbs }], index }, where text is the section body and breadcrumbs is 'note > heading > subheading'. limit defaults to 20, max 50. For exact words or phrases use search_vault_simple.",
+      "Semantic search over the vault using the embedding index built by the MCP Tools Obsidian plugin (the embedding provider and model are configured in the plugin settings). Finds sections whose meaning is close to the query even when they share no words with it. Results are per heading section; by default at most 2 sections from one note are returned (filter.maxPerNote), so more distinct notes appear. Returns { results: [{ path, text, score, breadcrumbs }], index }, where text is the section body and breadcrumbs is 'note > heading > subheading'. limit defaults to 20, max 50. For exact words or phrases use search_vault_simple.",
     ),
     async ({ arguments: args }) => {
       const data = await makeRequest(LocalRestAPI.ApiSmartSearchResponse, `/search/smart`, {

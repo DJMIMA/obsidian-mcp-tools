@@ -2,6 +2,8 @@ import { type } from "arktype";
 
 export const SEARCH_LIMIT_DEFAULT = 20;
 export const SEARCH_LIMIT_MAX = 50;
+/** Without a cap, one long note's sections can fill every slot and push other relevant notes out (evaluation 2026-10-03). */
+export const SEARCH_MAX_PER_NOTE_DEFAULT = 2;
 
 export const searchRequest = type({
   query: type("string>0").describe("A search phrase for semantic search"),
@@ -14,6 +16,9 @@ export const searchRequest = type({
     ),
     "limit?": type("1 <= number.integer <= 50").describe(
       "an integer from 1 to 50 (default 20), the maximum number of results to return",
+    ),
+    "maxPerNote?": type("1 <= number.integer <= 50").describe(
+      "an integer from 1 to 50 (default 2), the maximum number of sections returned from one note",
     ),
   },
 });

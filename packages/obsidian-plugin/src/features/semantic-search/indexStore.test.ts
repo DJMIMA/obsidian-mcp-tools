@@ -44,6 +44,15 @@ describe("IndexStore", () => {
     expect(top.score).toBeCloseTo(1 / Math.sqrt(1.01), 5);
   });
 
+  test("caps how many sections one note may contribute, filling the rest from other notes", () => {
+    const store = new IndexStore("fp", 2);
+    store.putNote("long.md", stat, [chunk("l1", [1, 0]), chunk("l2", [1, 0.01]), chunk("l3", [1, 0.02])]);
+    store.putNote("other.md", stat, [chunk("o1", [1, 0.5])]);
+    const query = Float32Array.from([1, 0]);
+    expect(store.search(query, { limit: 3 }).map((h) => h.text)).toEqual(["l1", "l2", "l3"]);
+    expect(store.search(query, { limit: 3, maxPerNote: 2 }).map((h) => h.text)).toEqual(["l1", "l2", "o1"]);
+  });
+
   test("takes its dimension from the first vector when it starts at 0, then rejects other sizes", () => {
     const store = new IndexStore("fp", 0);
     store.putNote("a.md", stat, [chunk("A", [1, 0, 0])]);
