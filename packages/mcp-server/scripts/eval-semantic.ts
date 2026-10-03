@@ -5,6 +5,8 @@
  *   bun scripts/eval-semantic.ts capture <label>   run the queries (limit 20) and save the results
  *   bun scripts/eval-semantic.ts pool <labelA> <labelB>    write a judging note into the vault
  *   bun scripts/eval-semantic.ts score <labelA> <labelB>   read the ticks and print metrics
+ *   bun scripts/eval-semantic.ts pool-more <label> <q,q,...>   write only notes not judged yet, for re-judging a few queries
+ *   bun scripts/eval-semantic.ts score <label>... --queries <q,q,...>   compare any number of runs on chosen queries
  *
  * Results go to %LOCALAPPDATA%/obsidian-mcp-tools/semantic-eval, outside the
  * repo and the vault, because they name personal notes. Only paths,
@@ -106,6 +108,7 @@ async function capture(label: string): Promise<void> {
 
 const EVAL_DIR = "_mcp-tools-eval";
 const JUDGMENT_FILE = "judgments.md";
+const MORE_FILE = "judgments-2.md";
 
 function load(label: string): Capture {
   const capture = JSON.parse(readFileSync(resolve(outDir, `${label}.json`), "utf8")) as Capture;
@@ -122,9 +125,13 @@ function rankedNotes(run: CapturedRun): string[] {
   return out;
 }
 
-function judgmentPath(): string {
+function judgmentFile(name: string): string {
   if (!vaultRoot) throw new Error(`vault location not found in ${configPath}`);
-  return resolve(vaultRoot, EVAL_DIR, JUDGMENT_FILE);
+  return resolve(vaultRoot, EVAL_DIR, name);
+}
+
+function judgmentPath(): string {
+  return judgmentFile(JUDGMENT_FILE);
 }
 
 function pool(labelA: string, labelB: string): void {
@@ -151,38 +158,78 @@ function pool(labelA: string, labelB: string): void {
   console.log(`wrote ${file}`);
 }
 
-function readJudgments(): Map<number, Set<string>> {
-  const relevant = new Map<number, Set<string>>();
+function readJudgmentFile(file: string, relevant: Map<number, Set<string>>, listed: Map<number, Set<string>>): void {
   let current = -1;
-  for (const line of readFileSync(judgmentPath(), "utf8").split(/\r?\n/)) {
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const heading = /^## Q(\d+)\./.exec(line);
     if (heading) {
       current = Number(heading[1]) - 1;
-      relevant.set(current, new Set());
+      if (!relevant.has(current)) relevant.set(current, new Set());
+      if (!listed.has(current)) listed.set(current, new Set());
       continue;
     }
     const item = /^- \[([ xX])\] \[\[(.+)\]\]\s*$/.exec(line);
-    if (item && current >= 0 && item[1] !== " ") relevant.get(current)!.add(`${item[2]}.md`);
+    if (item && current >= 0) {
+      const note = `${item[2]}.md`;
+      listed.get(current)!.add(note);
+      if (item[1] !== " ") relevant.get(current)!.add(note);
+    }
   }
-  return relevant;
 }
 
-function score(labelA: string, labelB: string): void {
-  const captures = [load(labelA), load(labelB)];
-  const judged = readJudgments();
-  const totals = captures.map(() => ({ top10: 0, top20: 0, reciprocal: 0, recall: 0, recallCount: 0, chars: 0 }));
+/** Ticks from judgments.md plus judgments-2.md when it exists. `listed` is every note that was put up for judging. */
+function readJudgments(): { relevant: Map<number, Set<string>>; listed: Map<number, Set<string>> } {
+  const relevant = new Map<number, Set<string>>();
+  const listed = new Map<number, Set<string>>();
+  readJudgmentFile(judgmentPath(), relevant, listed);
+  const more = judgmentFile(MORE_FILE);
+  if (existsSync(more)) readJudgmentFile(more, relevant, listed);
+  return { relevant, listed };
+}
+
+/** Writes judgments-2.md with only the notes of `label` that were never judged, for the given 1-based queries. */
+function poolMore(label: string, queryNumbers: number[]): void {
+  const capture = load(label);
+  const { listed } = readJudgments();
+  const lines = [
+    "# Semantic search judgments（追加分）",
+    "",
+    "前回の判定に無かったノートだけを並べています。関連するものの `[ ]` を `[x]` にしてください。並びは名前順です。",
+    "",
+  ];
+  for (const n of queryNumbers) {
+    const i = n - 1;
+    const fresh = rankedNotes(capture.runs[i])
+      .filter((note) => !listed.get(i)?.has(note))
+      .sort((x, y) => x.localeCompare(y));
+    lines.push(`## Q${n}. ${QUERIES[i]}`, "");
+    if (fresh.length === 0) lines.push("（新しく出てきたノートはありません）");
+    for (const note of fresh) lines.push(`- [ ] [[${note.replace(/\.md$/, "")}]]`);
+    lines.push("");
+  }
+  const file = judgmentFile(MORE_FILE);
+  if (existsSync(file)) throw new Error(`${file} already exists; delete it first so no ticks are lost by accident`);
+  writeFileSync(file, lines.join("\n"));
+  console.log(`wrote ${file}`);
+}
+
+function score(labels: string[], queryNumbers: number[]): void {
+  const captures = labels.map(load);
+  const { relevant: judged } = readJudgments();
+  const totals = captures.map(() => ({ top10: 0, top20: 0, reciprocal: 0, recall: 0, recallCount: 0, chars: 0, notes: 0 }));
   const header = captures.map((c) => `${c.label} 上位10 | 上位20 | 初出 | 再現率 | ノート数 | 文字数`).join(" | ");
   console.log(`| Q | 関連 | ${header} |`);
   console.log(`|---|---|${captures.map(() => "---|---|---|---|---|---").join("|")}|`);
-  QUERIES.forEach((_, i) => {
+  for (const n of queryNumbers) {
+    const i = n - 1;
     const relevant = judged.get(i) ?? new Set<string>();
     const cells = captures.map((capture, c) => {
       const run = capture.runs[i];
       const ranked = rankedNotes(run);
-      const top10 = ranked.slice(0, 10).filter((n) => relevant.has(n)).length;
-      const top20 = ranked.slice(0, 20).filter((n) => relevant.has(n)).length;
-      const first = ranked.findIndex((n) => relevant.has(n)) + 1;
-      const recall = relevant.size > 0 ? ranked.filter((n) => relevant.has(n)).length / relevant.size : null;
+      const top10 = ranked.slice(0, 10).filter((note) => relevant.has(note)).length;
+      const top20 = ranked.slice(0, 20).filter((note) => relevant.has(note)).length;
+      const first = ranked.findIndex((note) => relevant.has(note)) + 1;
+      const recall = relevant.size > 0 ? ranked.filter((note) => relevant.has(note)).length / relevant.size : null;
       const chars = run.results.reduce((sum, r) => sum + r.textChars, 0);
       const t = totals[c];
       t.top10 += top10;
@@ -193,25 +240,35 @@ function score(labelA: string, labelB: string): void {
         t.recallCount++;
       }
       t.chars += chars;
+      t.notes += ranked.length;
       return `${top10} | ${top20} | ${first || "-"} | ${recall === null ? "-" : recall.toFixed(2)} | ${ranked.length} | ${chars}`;
     });
-    console.log(`| ${i + 1} | ${relevant.size} | ${cells.join(" | ")} |`);
-  });
-  const n = QUERIES.length;
+    console.log(`| ${n} | ${relevant.size} | ${cells.join(" | ")} |`);
+  }
+  const count = queryNumbers.length;
   const summary = totals
-    .map((t) => `${(t.top10 / n).toFixed(1)} | ${(t.top20 / n).toFixed(1)} | MRR ${(t.reciprocal / n).toFixed(2)} | ${t.recallCount ? (t.recall / t.recallCount).toFixed(2) : "-"} | | ${Math.round(t.chars / n)}`)
+    .map((t) => `${(t.top10 / count).toFixed(1)} | ${(t.top20 / count).toFixed(1)} | MRR ${(t.reciprocal / count).toFixed(2)} | ${t.recallCount ? (t.recall / t.recallCount).toFixed(2) : "-"} | ${(t.notes / count).toFixed(1)} | ${Math.round(t.chars / count)}`)
     .join(" | ");
   console.log(`| 平均 | | ${summary} |`);
 }
+
+const parseQueries = (text: string): number[] => text.split(",").map((n) => Number(n.trim())).filter((n) => n >= 1 && n <= QUERIES.length);
+const allQueries = QUERIES.map((_, i) => i + 1);
 
 const [command, ...args] = process.argv.slice(2);
 if (command === "capture" && args[0]) {
   await capture(args[0]);
 } else if (command === "pool" && args[0] && args[1]) {
   pool(args[0], args[1]);
-} else if (command === "score" && args[0] && args[1]) {
-  score(args[0], args[1]);
+} else if (command === "pool-more" && args[0] && args[1]) {
+  poolMore(args[0], parseQueries(args[1]));
+} else if (command === "score" && args.length >= 1) {
+  const at = args.indexOf("--queries");
+  const labels = at >= 0 ? args.slice(0, at) : args;
+  score(labels, at >= 0 ? parseQueries(args[at + 1] ?? "") : allQueries);
 } else {
-  console.error("usage: bun scripts/eval-semantic.ts capture <label> | pool <labelA> <labelB> | score <labelA> <labelB>");
+  console.error(
+    "usage: bun scripts/eval-semantic.ts capture <label> | pool <labelA> <labelB> | pool-more <label> <q,q,...> | score <label>... [--queries q,q,...]",
+  );
   process.exit(1);
 }
