@@ -20,7 +20,7 @@
 | 接続方式 | Cohere 専用の接続と、OpenAI 互換の `/v1/embeddings`（OpenAI、Ollama、LM Studio、Gemini の互換エンドポイント等）の 2 つ。内部は「文書用」と「検索語用」を区別する共通の口にし、後から接続方式を足せるようにする |
 | 結果の単位 | 見出しごと（節ごと）。同じノートの別の節が複数並ぶことを許す |
 | 索引を作る場所 | Obsidian プラグインの中（A 案）。MCP サーバ側は窓口のまま |
-| `limit` | 1〜50 の整数、既定 10。範囲外は引数検証エラーとして `isError` で理由を返す |
+| `limit` | 1〜50 の整数、既定 20（/learn のサブエージェントが実際に 20 で呼んでいるため）。範囲外は引数検証エラーとして `isError` で理由を返す |
 
 ## 非目標
 
@@ -163,7 +163,7 @@ semantic-index/
 
 ### リクエスト
 
-今と同じ `{ query: string, filter?: { folders?: string[], excludeFolders?: string[], limit?: number } }`。MCP サーバは本文を JSON 文字列で送るので、プラグインは今の `jsonSearchRequest` と同じく文字列を JSON として解析してから検証する。`limit` は 1〜50 の整数、既定 10。不正なら 400。
+今と同じ `{ query: string, filter?: { folders?: string[], excludeFolders?: string[], limit?: number } }`。MCP サーバは本文を JSON 文字列で送るので、プラグインは今の `jsonSearchRequest` と同じく文字列を JSON として解析してから検証する。`limit` は 1〜50 の整数、既定 20。不正なら 400。
 
 ### 手順
 
@@ -259,7 +259,7 @@ semanticSearch: {
 
 - `features/smart-connections/` を `features/semantic-search/` に、`registerSmartConnectionsTools` を `registerSemanticSearchTools` に改名。`features/core/index.ts` の登録を差し替える。
 - ツール名 `search_vault_smart` と引数の形は変えない。`filter.limit` の型を `1 <= number.integer <= 50` にする。
-- 説明文（案）: "Semantic search over the vault using the embedding index built by the MCP Tools Obsidian plugin (the embedding provider and model are configured in the plugin settings). Finds sections whose meaning is close to the query even when they share no words with it. Results are per heading section, so one note can appear more than once. Returns { results: [{ path, text, score, breadcrumbs }], index }, where text is the section body and breadcrumbs is 'note > heading > subheading'. limit defaults to 10, max 50. For exact words or phrases use search_vault_simple."
+- 説明文（案）: "Semantic search over the vault using the embedding index built by the MCP Tools Obsidian plugin (the embedding provider and model are configured in the plugin settings). Finds sections whose meaning is close to the query even when they share no words with it. Results are per heading section, so one note can appear more than once. Returns { results: [{ path, text, score, breadcrumbs }], index }, where text is the section body and breadcrumbs is 'note > heading > subheading'. limit defaults to 20, max 50. For exact words or phrases use search_vault_simple."
 - `index.state` が `ready` でなければ、結果の先頭に 1 行付ける: `Index is still building (1200/1803 notes); results may be incomplete.`（`paused` なら `Index is paused (<理由>); results may be incomplete.`）
 - 503 / 502 は既存の `describeHttpError` が本文ごと `isError` の理由にするので、追加の処理は不要。
 - `describeApiError.ts` のタイムアウト文言の "Templater/Smart Connections operation" を "Templater or semantic search operation" に直す。
@@ -289,9 +289,15 @@ MCP サーバ側: `limit` の範囲外が引数検証エラーになること、
 
 ## 実機確認
 
-1. **切り替え前の記録**: 利用者が実際の検索語を 10 個ほど用意する。Smart Connections を外す前に、それを現行の `search_vault_smart` で検索して結果を保存する。保存先はスクラッチ領域で、個人のノート本文を含むためリポジトリには入れない。
+1. **切り替え前の記録**: 下の「評価用の検索語」10 個を、Smart Connections を外す前の現行 `/search/smart` に `limit: 20` で投げ、結果を JSON で保存する。スクリプトで直接ファイルに書き、会話のコンテキストには読み込まない。保存先はスクラッチ領域で、個人のノート本文を含むためリポジトリには入れない。
 2. ビルドして vault に配置し、設定画面で接続テスト → 見積もり → 索引の作成。所要時間・チャンク数・使ったトークン数を記録する。
-3. 1 の検索語で新しい索引を検索し、Smart Connections の結果と並べて利用者が判断する。
+3. **プーリング方式で判定する**: 同じ 10 個を新しい索引に同じ条件で投げる。検索語ごとに両方式の上位 20 件の和集合（`path` と `breadcrumbs`。方式名と順位は伏せる）を、チェックボックス付きのノートとして vault の `_mcp-tools-eval/` に書き出す。このフォルダは新しい索引の除外フォルダに入れる（入れないと、このノートがすべての検索語に当たる）。利用者が関連するものにチェックを付け、スクリプトがそれを読んで方式ごと・検索語ごとに集計する。
+   - 上位 10 件・上位 20 件に入った関連ノートの数
+   - 最初の関連ノートの順位
+   - 和集合の関連ノートのうち見つけた割合（相対再現率）
+   - 応答の大きさ（`text` の合計文字数）。重すぎれば節の上限文字数を下げる
+   
+   評価が終わったら `_mcp-tools-eval/` を消す。固有名詞（`sutimlimab`、`UBA1`、`IPSS-M` など）の取りこぼしが目立つ場合は、「将来の拡張」のキーワード検索との併用を次の課題にする。
 4. `packages/mcp-server/scripts/verify-semantic.ts`（`bun run verify:semantic`）。`verify:paths` と同じく MCP のバイナリを stdio で起動し、次を確かめる。
    - CLAUDE.md の 5 パターン（ルート直下、ASCII、スペース、日本語、3 階層以上）にテスト用ノートを作る。ノートごとに固有の話題の本文にする。
    - 差分更新を待ち（検索して当たるまでポーリング、上限 60 秒）、言い換えた検索語で該当ノートが当たること。
@@ -301,6 +307,21 @@ MCP サーバ側: `limit` の範囲外が引数検証エラーになること、
    - 後片付けは `verify:paths` と同じ（作ったノートを消し、空ディレクトリはディスク上で消す）。
 5. Obsidian を再起動して、埋め込みをやり直さずに shard から読み込まれること（使ったトークン数の累計が増えないこと）。
 6. ログで 1 回の検索の所要時間（埋め込み・総当たり）を確認する。
+
+### 評価用の検索語
+
+Claude Code での実際の運用（/learn）で、vault を横断検索するサブエージェントが投げていたもの。日本語と英語が混ざった、キーワードを並べた形が多い。
+
+1. `inotuzumab ozogamicin CD22 抗体薬物複合体 B-ALL 再発難治`
+2. `"脂質異常症の管理（LDL/TG/HDL目標・一次/二次予防・食事・薬物療法）＋血液内科領域の薬剤性脂質異常"`
+3. `VEXAS症候群の治療 UBA1 JAK阻害薬 アザシチジン 同種移植`
+4. `眼内悪性リンパ腫 硝子体網膜リンパ腫 治療 メトトレキサート硝子体内注射`
+5. `中枢神経系原発リンパ腫 PCNSL 大量メトトレキサート 全脳照射 治療`
+6. `MDS 骨髄異形成症候群 遺伝子変異 予後予測 IPSS-M IPSS-R`
+7. `遺伝子パネル検査 HemeSight 造血器腫瘍 腫瘍正常ペア解析 VUS germline`
+8. `寒冷凝集素症 cold agglutinin disease 自己免疫性溶血性貧血`
+9. `溶血性貧血 直接クームス試験 補体 C1s sutimlimab rituximab`
+10. `濾胞性リンパ腫 DLBCL 形質転換 transformed follicular lymphoma 予後`
 
 ## 将来の拡張（今回はやらない）
 
