@@ -157,7 +157,7 @@ vault 内パスを URL パスに埋め込む処理を書く・直すときは、
 ### 前提ツール
 
 - ランタイム/バンドラは Bun のみ（`mise.toml`: `bun = "latest"`、README は v1.1.42 以上）。Node は使わない。
-- このマシンには bun 1.4.0 が入っており、`bun install` 済み（2026-09-03）。bun 1.4 は `bun install` のたびに `bun.lock` の GitHub 依存 3 件に integrity ハッシュを追記して差分を出すが、解決バージョンは変わらない。
+- このマシンには bun 1.4.2 が入っており、`bun install` 済み（2026-09-03 に 1.4.0 で実施）。bun 1.4 は `bun install` のたびに `bun.lock` の GitHub 依存 3 件に integrity ハッシュを追記して差分を出すが、解決バージョンは変わらない。
 - `.claude/worktrees/` 下の worktree には `node_modules` が無く、そのままだと `shared` がリポジトリ本体の `node_modules/shared`（本体の `packages/shared` への junction）に解決される。worktree で `packages/shared` を変えても `bun run check` / `bun test` / ビルドは本体の古い `shared` を見て通ってしまう。worktree ではまず `bun install` し（`bun.lock` の差分は `git checkout -- bun.lock` で戻す）、`node_modules/shared` が worktree 側を指すことを確かめる。
 - Windows で `link` スクリプトを使う場合、`symlinkSync(..., "dir")` はシンボリックリンク作成権限が要る。権限がなければ後述のコピー方式にする。
 
@@ -196,7 +196,7 @@ cd packages/mcp-server && bun test
 
 テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 mcp-server は 117 件、obsidian-plugin は 93 件がすべて通る（2026-10-03 確認）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
+現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-06 確認）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -260,9 +260,9 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-24 時点で 179/179 PASS。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-10-06 時点で 179/179 PASS。
 
-意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-05 時点で 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
+意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-06 時点で 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
 
 ## バージョン整合
 
