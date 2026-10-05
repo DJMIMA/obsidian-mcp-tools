@@ -145,6 +145,7 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 - 最初の索引作りは設定画面のボタンを押したときだけ始まる（vault 全体をクラウドに送るので）。以後は `metadataCache` の `changed` と vault の `delete` / `rename` を 10 秒まとめて差分更新し、送る文字列のハッシュが同じ節は前のベクトルを使い回す。
 - 失敗: 401/403 は停止して Notice、429/5xx/通信エラーは 2・8・30 秒で再試行してから停止し 5 分後に再開、400 はノート単位に送り直して原因のノートだけ「失敗」として記録する（更新されるまで再送しない）。
 - `/search/smart` は未設定・空なら 503、検索語の埋め込み失敗は 502（本文 `{ message }`）。応答に `index`（状態）が付き、MCP ツールは `ready` 以外なら先頭に警告を 1 行付ける。`limit` は 1〜50 の整数、既定 20。1 ノートから返す節は `maxPerNote`（既定 2）まで。上限なしだと長いノートの節が上位 20 件の 17 件を占めるなどして、ほかの関連ノートが押し出されていた（2026-10-03 の評価。偏りの大きかった 3 語で判定し直すと、上位 20 件の関連ノート数の平均は上限なし 3.0 件、上限 2 で 8.7 件、Smart Connections 6.7 件）。
+- 応答の `text` は既定で 300 字に切る（初めは 500 字だったが、実 vault の 200 節の測定で 500 字だと本文の 69% が残るだけだったため 300 字にした。中央値 163 字、p90 753 字）（2026-10-05）。見出しの少ない OneNote 由来のノートは 1 節が全文（約 6,000 字）になり、論文の `# Related` 節も約 3,000 字で、`limit: 20` の 1 回の検索がサブエージェントで大量のトークンを使っていた。設定は `resultMaxChars`（設定画面 "Max characters per search result"、0 で全文）。索引の識別子に入らないので変更しても再構築しない。リクエストの `filter.maxTextChars`（0〜20000、0 は全文）が設定より優先される。切った結果には `truncated: true` と節全体の長さ `fullChars` が付き、本文末尾は `…`。切る処理は `searchHandler.ts` の `truncateText`（サロゲートペアを割らない）。全文が要るときは `get_vault_file` か `maxTextChars` で取り直す。
 - 単体テストは `packages/obsidian-plugin/src/features/semantic-search/**/*.test.ts`。実機は `bun run verify:semantic`（後述）。
 
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
@@ -195,7 +196,7 @@ cd packages/mcp-server && bun test
 
 テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 mcp-server は 117 件中 4 件が失敗する（2026-10-03 確認、上流から引き継いだ不整合）。obsidian-plugin の 86 件はすべて通る。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
+現状 mcp-server は 119 件中 4 件が失敗する（2026-10-05 確認、上流から引き継いだ不整合）。obsidian-plugin の 99 件はすべて通る。`parseTemplateParameters.test.ts` は `<% tp.user.promptArg("name") %>` 形式を期待しているが、実装の `CallExpressionSchema` と `main.ts` が Templater に注入する関数は `tp.mcpTools.prompt(...)` で、テスト側が古い。失敗しているのはこの 4 件だけで、環境起因ではない。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -261,7 +262,7 @@ cd packages/mcp-server && bun run build:windows && bun run verify:paths
 
 `scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-09-24 時点で 179/179 PASS。
 
-意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
+意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-05 時点で 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
 
 ## バージョン整合
 

@@ -14,6 +14,8 @@ export interface SearchDeps {
   chunkCount(): number;
   embedQuery(query: string): Promise<Float32Array>;
   search(vector: Float32Array, options: SearchOptions): SearchHit[];
+  /** The plugin setting used when the request gives no maxTextChars; 0 means whole sections. */
+  maxTextChars(): number;
   log(message: string, data?: Record<string, unknown>): void;
   now(): number;
 }
@@ -58,9 +60,31 @@ export async function handleSearch(body: unknown, deps: SearchDeps): Promise<Han
     searchMs: Math.round(deps.now() - embedded),
     results: hits.length,
   });
+  const maxTextChars = request.filter?.maxTextChars ?? deps.maxTextChars();
   const response: SearchResponse = {
-    results: hits.map((hit) => ({ path: hit.path, text: hit.text, score: hit.score, breadcrumbs: hit.breadcrumbs })),
+    results: hits.map((hit) => {
+      const cut = truncateText(hit.text, maxTextChars);
+      return {
+        path: hit.path,
+        text: cut.text,
+        score: hit.score,
+        breadcrumbs: hit.breadcrumbs,
+        ...(cut.truncated ? { truncated: true, fullChars: hit.text.length } : {}),
+      };
+    }),
     index,
   };
   return { status: 200, body: response };
+}
+
+const ELLIPSIS = "…";
+
+/** Cuts `text` to at most `max` characters before the ellipsis; `max` of 0 (or less) keeps it whole. */
+export function truncateText(text: string, max: number): { text: string; truncated: boolean } {
+  if (!(max > 0) || text.length <= max) return { text, truncated: false };
+  let end = max;
+  const last = text.charCodeAt(end - 1);
+  // Do not split a surrogate pair (an emoji would turn into a lone half).
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return { text: text.slice(0, end).trimEnd() + ELLIPSIS, truncated: true };
 }

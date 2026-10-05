@@ -190,6 +190,7 @@ export class SemanticSearchFeature {
           return (await this.provider.embed([query], "query")).vectors[0];
         },
         search: (vector, options) => (this.store ? this.store.search(vector, options) : []),
+        maxTextChars: () => this.settings.resultMaxChars,
         log: (message, data) => logger.info(message, data),
         now: () => performance.now(),
       });

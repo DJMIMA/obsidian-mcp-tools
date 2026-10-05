@@ -1,3 +1,4 @@
+import { SEARCH_MAX_TEXT_CHARS_DEFAULT } from "shared";
 import { CHUNKER_VERSION } from "./chunker";
 
 export const COHERE_DIMENSIONS = [256, 512, 768, 1024, 1536, 2048] as const;
@@ -21,6 +22,8 @@ export interface SemanticSearchSettings {
   /** Path prefixes never sent to the embedding API. */
   excludeFolders: string[];
   maxChunkChars: number;
+  /** Characters of each section's text returned by a search; 0 returns whole sections. Does not affect the index. */
+  resultMaxChars: number;
 }
 
 export const DEFAULT_SEMANTIC_SEARCH_SETTINGS: SemanticSearchSettings = {
@@ -37,6 +40,7 @@ export const DEFAULT_SEMANTIC_SEARCH_SETTINGS: SemanticSearchSettings = {
   },
   excludeFolders: [],
   maxChunkChars: 4000,
+  resultMaxChars: SEARCH_MAX_TEXT_CHARS_DEFAULT,
 };
 
 /** A whole number at least `min`, or null when `value` is not one (a cleared field arrives as null). */
@@ -62,6 +66,7 @@ export function withDefaults(stored: Partial<SemanticSearchSettings> | undefined
     },
     excludeFolders: [...(stored?.excludeFolders ?? d.excludeFolders)],
     maxChunkChars: atLeast(stored?.maxChunkChars, 200) ?? d.maxChunkChars,
+    resultMaxChars: atLeast(stored?.resultMaxChars, 0) ?? d.resultMaxChars,
   };
 }
 

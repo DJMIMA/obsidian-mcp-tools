@@ -5,7 +5,9 @@
  * per path pattern from CLAUDE.md (each on its own topic), waits for the
  * plugin's incremental update, then checks that a paraphrased query finds it,
  * that folder filters work with spaces, Japanese and nesting, that limit is
- * validated, and that edits and deletions reach the index. The index must
+ * validated, that edits and deletions reach the index, and that a long section
+ * is cut to the plugin's "Max characters per search result" (expects the
+ * default, 300) unless filter.maxTextChars says otherwise. The index must
  * already be built (state "ready" in the plugin settings), and
  * `_mcp-tools-test/` must not be an excluded folder. Test notes are deleted
  * afterwards and empty directories are removed on disk.
@@ -141,6 +143,38 @@ for (const p of patterns) {
   record(p.id, "delete", deleted.ok, deleted.ok ? deleted.text : deleted.error);
   const gone = await waitFor(p.query, { folders: [p.folder], limit: 5 }, (h) => !h.some((x) => x.path === p.path));
   record(p.id, "delete reaches the index", gone.pass, JSON.stringify(hits(gone.outcome).map((h) => h.path)));
+}
+
+// Text length: a note with one long section is cut to the plugin setting (default 300) unless the request says otherwise.
+{
+  const path = `${BASE}-long.md`;
+  const query = "干潟で渡り鳥が潮の引いたあとに食べるもの";
+  const body = Array.from({ length: 60 }, (_, i) => `第${i + 1}節、干潟の渡り鳥は潮が引くと泥の中の小さな貝やゴカイをついばむ。`).join("");
+  const content = `# 長いテストノート\n\n${body}\n`;
+  const created = await call("create_vault_file", { filename: path, content });
+  record("t", "create long note", created.ok, created.ok ? `${content.length} chars` : created.error);
+  const found = await waitFor(query, { folders: [path], limit: 3 }, (h) => h[0]?.path === path);
+  record("t", "long note is indexed", found.pass, JSON.stringify(hits(found.outcome)[0]?.breadcrumbs ?? found.outcome));
+
+  type Cut = Hit & { truncated?: boolean; fullChars?: number };
+  const top = async (filter: Record<string, unknown>) => hits((await search(query, { folders: [path], limit: 3, ...filter })).outcome)[0] as Cut | undefined;
+
+  const byDefault = await top({});
+  record("t", "default cut to 300 chars + ellipsis", !!byDefault && byDefault.text.length === 301 && byDefault.text.endsWith("…"), `length ${byDefault?.text.length}`);
+  record("t", "truncated and fullChars are set", byDefault?.truncated === true && byDefault.fullChars === content.trim().length, `truncated=${byDefault?.truncated} fullChars=${byDefault?.fullChars} (note ${content.trim().length})`);
+  record("t", "text starts with the heading line", !!byDefault?.text.startsWith("# 長いテストノート"), byDefault?.text.slice(0, 20) ?? "none");
+
+  const small = await top({ maxTextChars: 100 });
+  record("t", "maxTextChars 100 overrides the setting", small?.text.length === 101 && small.truncated === true, `length ${small?.text.length}`);
+  const whole = await top({ maxTextChars: 0 });
+  record("t", "maxTextChars 0 returns the whole section", whole?.text.length === content.trim().length && whole.truncated === undefined, `length ${whole?.text.length} truncated=${whole?.truncated}`);
+  const wide = await top({ maxTextChars: 5000 });
+  record("t", "limit above the section length is not truncated", wide?.truncated === undefined && wide?.text.length === content.trim().length, `length ${wide?.text.length}`);
+  const bad = await call("search_vault_smart", { query: "test", filter: { maxTextChars: 20001 } });
+  record("t", "maxTextChars 20001 is rejected", !bad.ok && bad.error.includes("maxTextChars"), bad.ok ? bad.text : bad.error);
+
+  const deleted = await call("delete_vault_file", { filename: path });
+  record("t", "delete long note", deleted.ok, deleted.ok ? deleted.text : deleted.error);
 }
 
 for (const limit of [0, 51, 2.5]) {
