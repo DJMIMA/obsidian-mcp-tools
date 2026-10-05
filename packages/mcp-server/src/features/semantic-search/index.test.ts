@@ -35,4 +35,19 @@ describe("search_vault_smart arguments", () => {
     expect(tool?.description).toContain("at most 2 sections from one note");
     expect(JSON.stringify(tool?.inputSchema)).toContain("maxPerNote");
   });
+
+  test("the tool advertises the text cut and the maxTextChars override", () => {
+    const tool = tools.list().tools.find((t) => t.name === "search_vault_smart");
+    expect(JSON.stringify(tool?.inputSchema)).toContain("maxTextChars");
+    expect(tool?.description).toContain("truncated: true");
+  });
+
+  test("maxTextChars outside 0-20000 is an error result", async () => {
+    const result = await tools.dispatch(
+      { name: "search_vault_smart", arguments: { query: "x", filter: { maxTextChars: 20001 } } },
+      context,
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("maxTextChars");
+  });
 });

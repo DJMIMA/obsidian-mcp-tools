@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SearchIndexStatus } from "shared";
 import type { SearchOptions } from "./indexStore";
-import { EMPTY_MESSAGE, UNCONFIGURED_MESSAGE, handleSearch, type SearchDeps } from "./searchHandler";
+import { EMPTY_MESSAGE, UNCONFIGURED_MESSAGE, handleSearch, truncateText, type SearchDeps } from "./searchHandler";
 
 const ready: SearchIndexStatus = {
   state: "ready",
@@ -21,6 +21,7 @@ function deps(overrides: Partial<SearchDeps> = {}) {
       searches.push(options);
       return [{ path: "a.md", breadcrumbs: "a > A", text: "# A\nalpha", score: 0.9 }];
     },
+    maxTextChars: () => 300,
     log: () => {},
     now: () => 0,
   };
@@ -45,6 +46,48 @@ describe("handleSearch", () => {
     const { deps: d, searches } = deps();
     await handleSearch({ query: "x", filter: { limit: 5, maxPerNote: 1, folders: ["日記/"], excludeFolders: ["My Notes/"] } }, d);
     expect(searches[0]).toEqual({ limit: 5, maxPerNote: 1, folders: ["日記/"], excludeFolders: ["My Notes/"] });
+  });
+
+  describe("text length", () => {
+    const long = `# A\n${"あ".repeat(1000)}`;
+    const longHit = deps({
+      search: () => [{ path: "a.md", breadcrumbs: "a > A", text: long, score: 0.9 }],
+    });
+    const run = async (filter: object | undefined, d = longHit.deps) => {
+      const response = await handleSearch(JSON.stringify({ query: "x", ...(filter ? { filter } : {}) }), d);
+      return (response.body as { results: { text: string; truncated?: boolean; fullChars?: number }[] }).results[0];
+    };
+
+    test("cuts to the plugin setting and says how long the section was", async () => {
+      const hit = await run(undefined);
+      expect(hit.text).toBe(long.slice(0, 300) + "…");
+      expect(hit.truncated).toBe(true);
+      expect(hit.fullChars).toBe(long.length);
+    });
+
+    test("leaves short text untouched, without the flags", async () => {
+      const { deps: d } = deps();
+      const hit = await run(undefined, d);
+      expect(hit).toEqual({ path: "a.md", text: "# A\nalpha", score: 0.9, breadcrumbs: "a > A" });
+    });
+
+    test("filter.maxTextChars overrides the setting; 0 returns the whole section", async () => {
+      expect((await run({ maxTextChars: 100 })).text).toBe(long.slice(0, 100) + "…");
+      const whole = await run({ maxTextChars: 0 });
+      expect(whole.text).toBe(long);
+      expect(whole.truncated).toBeUndefined();
+    });
+
+    test("a setting of 0 returns whole sections", async () => {
+      const d = deps({ search: longHit.deps.search, maxTextChars: () => 0 }).deps;
+      expect((await run(undefined, d)).text).toBe(long);
+    });
+
+    test("does not split a surrogate pair", () => {
+      expect(truncateText("ab😀cd", 3)).toEqual({ text: "ab…", truncated: true });
+      expect(truncateText("ab😀cd", 4)).toEqual({ text: "ab😀…", truncated: true });
+      expect(truncateText("abc", 3)).toEqual({ text: "abc", truncated: false });
+    });
   });
 
   test("rejects a bad request with 400 and the reason", async () => {

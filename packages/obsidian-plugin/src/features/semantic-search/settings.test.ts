@@ -35,6 +35,14 @@ describe("withDefaults guards numbers", () => {
     expect(withDefaults({ maxChunkChars: 2500.7 } as never).maxChunkChars).toBe(2500);
     expect(withDefaults({ openaiCompatible: { batchSize: -3 } } as never).openaiCompatible.batchSize).toBe(64);
   });
+
+  test("resultMaxChars defaults to 300, keeps 0 (whole sections) and rejects negatives and null", () => {
+    expect(withDefaults(undefined).resultMaxChars).toBe(300);
+    expect(withDefaults({ resultMaxChars: 0 } as never).resultMaxChars).toBe(0);
+    expect(withDefaults({ resultMaxChars: 800.9 } as never).resultMaxChars).toBe(800);
+    expect(withDefaults({ resultMaxChars: -1 } as never).resultMaxChars).toBe(300);
+    expect(withDefaults({ resultMaxChars: null } as never).resultMaxChars).toBe(300);
+  });
 });
 
 describe("fingerprint", () => {
@@ -58,6 +66,7 @@ describe("fingerprint", () => {
     b.openaiCompatible.baseUrl = "http://elsewhere/v1";
     b.openaiCompatible.batchSize = 8;
     b.excludeFolders = ["Private/"];
+    b.resultMaxChars = 0;
     expect(requiresRebuild(a, b)).toBe(false);
   });
 

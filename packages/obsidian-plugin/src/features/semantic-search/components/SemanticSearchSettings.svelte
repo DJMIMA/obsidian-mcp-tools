@@ -205,6 +205,11 @@
     <label for="ss-max">Max characters per section</label>
     <input id="ss-max" type="number" min="200" bind:value={draft.maxChunkChars} />
   </div>
+  <div class="row">
+    <label for="ss-result-max">Max characters per search result (0 = whole section)</label>
+    <input id="ss-result-max" type="number" min="0" bind:value={draft.resultMaxChars} />
+  </div>
+  <div class="note">Cuts the text returned to the AI; the index is not rebuilt. A search call can override it with filter.maxTextChars.</div>
 
   <div class="buttons">
     <button on:click={save} disabled={busy || !dirty}>Save</button>
