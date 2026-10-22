@@ -976,11 +976,7 @@ paths:
       description: |
         Evaluates a provided query against each file in your vault.
 
-        This endpoint supports multiple query formats.  Your query should be specified in your request's body, and will be interpreted according to the `Content-type` header you specify from the below options.Additional query formats may be added in the future.
-
-        # Dataview DQL (`application/vnd.olrapi.dataview.dql+txt`)
-
-        Accepts a `TABLE`-type Dataview query as a text string.  See [Dataview](https://blacksmithgu.github.io/obsidian-dataview/query/queries/)'s query documentation for information on how to construct a query.
+        Your query should be specified in your request's body, and will be interpreted according to the `Content-type` header you specify from the below options.  JsonLogic is the only supported format; Dataview DQL (`application/vnd.olrapi.dataview.dql+txt`) was removed in Local REST API 4.0 and is now rejected with error 40012.
 
         # JsonLogic (`application/vnd.olrapi.jsonlogic+json`)
 
@@ -1008,21 +1004,6 @@ paths:
         for working examples of queries performing common search operations.
       requestBody:
         content:
-          "application/vnd.olrapi.dataview.dql+txt":
-            examples:
-              find_fields_by_tag:
-                summary: "List data from files having the #game tag."
-                value: |
-                  TABLE
-                    time-played AS "Time Played",
-                    length AS "Length",
-                    rating AS "Rating"
-                  FROM #game
-                  SORT rating DESC
-            schema:
-              externalDocs:
-                url: "https://blacksmithgu.github.io/obsidian-dataview/query/queries/"
-              type: "object"
           "application/vnd.olrapi.jsonlogic+json":
             examples:
               find_by_frontmatter_url_glob:

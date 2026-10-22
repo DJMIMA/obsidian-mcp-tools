@@ -154,29 +154,26 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     },
   );
 
-  // POST Search via Dataview or JsonLogic
+  // POST Search via JsonLogic (Local REST API 4.0 dropped Dataview DQL)
   tools.register(
     type({
       name: '"search_vault"',
       arguments: {
-        queryType: '"dataview" | "jsonlogic"',
+        "queryType?": type('"jsonlogic"').describe(
+          '"jsonlogic" (the only query type; Dataview DQL was removed in Local REST API 4.0)',
+        ),
         query: "string",
       },
     }).describe(
-      "Run a structured query against every file in the vault. queryType 'dataview' takes a Dataview DQL TABLE query (LIST, TASK, and CALENDAR queries are not supported; requires the Dataview plugin). queryType 'jsonlogic' takes a JsonLogic expression as a JSON string, evaluated against each note's JSON form (content, frontmatter, tags, path, stat), with extra glob and regexp operators. Returns [{ filename, result }] only for files whose result is not falsy. For plain text matching use search_vault_simple.",
+      "Run a JsonLogic query against every file in the vault. query is a JsonLogic expression as a JSON string, evaluated against each note's JSON form (content, frontmatter, tags, path, stat), with extra glob and regexp operators. Returns [{ filename, result }] only for files whose result is not falsy. For plain text matching use search_vault_simple.",
     ),
     async ({ arguments: args }) => {
-      const contentType =
-        args.queryType === "dataview"
-          ? "application/vnd.olrapi.dataview.dql+txt"
-          : "application/vnd.olrapi.jsonlogic+json";
-
       const data = await makeRequest(
         LocalRestAPI.ApiSearchResponse,
         "/search/",
         {
           method: "POST",
-          headers: { "Content-Type": contentType },
+          headers: { "Content-Type": "application/vnd.olrapi.jsonlogic+json" },
           body: args.query,
         },
       );

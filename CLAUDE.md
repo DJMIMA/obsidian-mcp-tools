@@ -135,6 +135,14 @@ Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイト�
 
 対応: `ApiNoteJson.frontmatter` を `Record<string, unknown>` にし、`ApiVaultFileResponse` は `ApiNoteJson` の別名にした。Local REST API の `getFileMetadataObject` は Obsidian のパース結果から `position` を消したものをそのまま返す（frontmatter が無ければ `{}`）ので、値はリスト・数値・真偽値・null・入れ子オブジェクトになりうる。常にあるのは `content` / `frontmatter` / `path` / `stat` / `tags`（frontmatter のリスト tags とインラインタグを `#` を外して合わせたもの）。frontmatter の値を読む側は型を確かめる（`prompts/index.ts` の `description`）。単体テストは `features/local-rest-api/noteJson.test.ts` と `makeRequest.test.ts`。
 
+### `search_vault` は JsonLogic のみ（Dataview DQL は廃止）
+
+症状: `search_vault` の `queryType: "dataview"` が `Bad request` + `40012: Unknown or invalid Content-Type` で必ず失敗していた（Local REST API 5.4.0、2026-10-23）。同じ DQL を `curl` で `/search/` に直接送っても同じ応答。
+
+原因: Local REST API 4.0.0 が Dataview DQL 検索を削除した。インストール済み 5.4.0 の `main.js` の `searchQueryPost` は `application/vnd.olrapi.jsonlogic+json` のハンドラしか持たず、それ以外の Content-Type は 40012 で返す。DQL を処理するコードは本体に残っていない。
+
+対応: `search_vault` から dataview を外した。`queryType` は `"jsonlogic"` だけを受け付ける省略可能な引数として残し（既存の呼び出し方を壊さないため）、常に JsonLogic として送る。`"dataview"` を渡すと引数検証で `isError` になる。`packages/obsidian-plugin/docs/openapi.yaml`（Local REST API の仕様の写し）からも DQL の記述を消した。DQL が要るなら、本プラグインに `/search/smart` と同じ要領で Dataview API を呼ぶルートを足す必要がある（未実装）。
+
 ### 意味検索は自前の埋め込み索引で行う（Smart Connections は使わない）
 
 背景: Smart Connections で任意の埋め込みモデル（API）を使うには Pro（年 299 ドル）が要り、無料のローカルモデル（multilingual-e5-small、512 トークン、ノート全体の埋め込みは実質冒頭数百字）では日本語の検索が弱かった。2026-10 に置き換えた。設計は `docs/superpowers/specs/2026-10-03-semantic-search-design.md`、実装計画は `docs/superpowers/plans/2026-10-03-semantic-search.md`。
