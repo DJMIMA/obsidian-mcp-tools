@@ -206,6 +206,21 @@ cd packages/mcp-server && bun test
 
 現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-06 確認）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
 
+### CI（`.github/workflows/ci.yml`）
+
+`main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。2 ジョブ：
+
+- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun audit`（報告だけ。下記）→ `bun run check`（test-site の svelte-check を含む）→ 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
+- `windows`: 両パッケージの `bun test` → プラグインのビルド → `build:windows` して `--version` を確認 → `main.js` / `manifest.json` / `packages/mcp-server/dist/mcp-server-windows.exe` を artifact `mcp-tools-windows-<sha>`（14 日保持）に上げる。vault へ手で置くときはここから取ってよい（exe は `bin/mcp-server.exe` にリネーム）。
+
+プラグインのビルドに要る `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` はステップ内でルート `package.json` の版から組む。Actions は `GITHUB_REF_NAME` に `main` や `<PR番号>/merge` を自動で入れるので、上書きしないとマクロの semver `clean()` が `null` を返し、版の代わりに `null` が埋め込まれる。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
+
+### 依存と脆弱性
+
+- `bun audit`（CI の `linux` ジョブ）: 見つかってもジョブは落とさない。件数を `::warning::` に、全文をジョブの Summary に出す。2026-10-27 時点で 135 件（critical 2、high 60、moderate 55、low 18）。大半は test-site（SvelteKit / vite / eslint 系）と開発ツール由来。件数を減らしたら失敗扱いに切り替える。
+- Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。
+- リポジトリの Dependabot alerts（vulnerability alerts）は 2026-10-27 に有効化した。ただし GitHub の dependency graph は `bun.lock` を読まず、各 `package.json` の直接依存を範囲指定のまま拾うだけ（GraphQL の `dependencyGraphManifests` で確認）。推移的な依存（`proxy-addr`、`node-forge` など）はアラートに出ないので、そこは `bun audit` で見る。自動のセキュリティ修正 PR（automated security fixes）は無効のまま。
+
 ### vault へのインストール（Windows、この fork の運用）
 
 プラグイン本体は `<vault>/.obsidian/plugins/mcp-tools/` に `main.js` と `manifest.json` があればよい（`manifest.json` の `id` は `mcp-tools`）。2 通り：

@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # 型チェック・テスト・プラグインのビルドと、Linux 向けサーバのビルドを確かめる
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # 報告だけ。見つかってもジョブは失敗させず、件数を警告に、全文をジョブの Summary に出す
+      - name: Audit dependencies (report only)
+        run: |
+          set +e
+          bun audit > audit.txt 2>&1
+          status=$?
+          set -e
+          summary=$(grep -E '^[0-9]+ vulnerabilit' audit.txt | tail -n 1)
+          if [ $status -eq 0 ]; then
+            summary="No vulnerabilities found"
+          elif [ -z "$summary" ]; then
+            summary="bun audit exited with $status (see the job summary)"
+          fi
+          {
+            echo "## bun audit"
+            echo
+            echo "$summary"
+            echo
+            echo "<details><summary>Full output</summary>"
+            echo
+            echo '```'
+            cat audit.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ $status -ne 0 ]; then
+            echo "::warning title=bun audit::$summary"
+          fi
+
+      - name: Type check
+        run: bun run check
+
+      - name: Test mcp-server
+        working-directory: packages/mcp-server
+        run: bun test
+
+      - name: Test obsidian-plugin
+        working-directory: packages/obsidian-plugin
+        run: bun test src
+
+      # bundle-time.ts のマクロはこの 2 変数を必須で読む。GITHUB_REF_NAME は
+      # Actions が "main" などを入れてくるので、ルート package.json の版で上書きする
+      - name: Build obsidian-plugin
+        working-directory: packages/obsidian-plugin
+        run: |
+          VERSION=$(jq -r .version ../../package.json)
+          GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/$VERSION" \
+          GITHUB_REF_NAME="$VERSION" \
+          bun run build
+          test -s ../../main.js
+
+      - name: Build mcp-server (linux)
+        working-directory: packages/mcp-server
+        run: |
+          bun run build:linux
+          test "$(./dist/mcp-server-linux --version)" = "$(jq -r .version ../../package.json)"
+
+  # 実際に使う Windows バイナリを作り、テストも Windows 上で回す
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test mcp-server
+        working-directory: packages/mcp-server
+        run: bun test
+
+      - name: Test obsidian-plugin
+        working-directory: packages/obsidian-plugin
+        run: bun test src
+
+      - name: Build obsidian-plugin
+        working-directory: packages/obsidian-plugin
+        run: |
+          VERSION=$(jq -r .version ../../package.json)
+          GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/$VERSION" \
+          GITHUB_REF_NAME="$VERSION" \
+          bun bun.config.ts --prod
+
+      - name: Build mcp-server (windows)
+        working-directory: packages/mcp-server
+        run: |
+          bun run build:windows
+          test "$(./dist/mcp-server-windows.exe --version | tr -d '\r')" = "$(jq -r .version ../../package.json)"
+
+      # vault へ手で置く 3 ファイル。bin/mcp-server.exe へはリネームして置く
+      - name: Upload build
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcp-tools-windows-${{ github.sha }}
+          path: |
+            main.js
+            manifest.json
+            packages/mcp-server/dist/mcp-server-windows.exe
+          if-no-files-found: error
+          retention-days: 14
