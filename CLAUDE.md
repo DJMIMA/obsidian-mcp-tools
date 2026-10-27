@@ -41,12 +41,12 @@ Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `sha
 - レスポンスは Content-Type が json なら `json()`、それ以外は `text()` で読み、arktype スキーマで検証。204 は `undefined`。スキーマ不一致も `ObsidianApiError` になり、どのエンドポイントの応答が想定外だったかを含む。
 - `OBSIDIAN_REQUEST_TIMEOUT_MS` を設定するとその ms で `AbortSignal.timeout` を張る。**既定は無制限**（Templater 実行や意味検索が長時間かかりうるため）。
 
-パス組み立ては共通化されておらず、`features/local-rest-api/index.ts` ほかでツールごとに書かれている。現状の内訳：
+パスの組み立ては各ツールに書かれているが、vault 内パスはすべて `shared/encodeVaultPath.ts` を通す（理由は「vault パスはセグメント単位でエンコードする」の節）。現状の内訳：
 
 | 組み立て方 | 該当箇所 |
 |---|---|
-| パス全体を `encodeURIComponent` | `get_vault_file`, `create_vault_file`, `append_to_vault_file`, `patch_vault_file`, `delete_vault_file`（`/vault/${encodeURIComponent(args.filename)}`）、`show_file_in_obsidian`（`/open/${encodeURIComponent(args.filename)}`） |
-| エンコードなし | `list_vault_files`（`/vault/${args.directory}/`）、`features/templates/index.ts`（`/vault/${args.name}`）、`features/prompts/index.ts`（`/vault/Prompts/${filename}`） |
+| `encodeVaultPath` | `get_vault_file`, `create_vault_file`, `append_to_vault_file`, `patch_vault_file`, `delete_vault_file`（`/vault/${encodeVaultPath(args.filename)}`）、`show_file_in_obsidian`（`/open/...`）、`list_vault_files`（`/vault/<encoded>/`）、`features/templates`（`/vault/${encodeVaultPath(args.name)}`）、`features/prompts`（`/vault/${encodeVaultPath("Prompts/<file>")}`） |
+| 固定パス | `/active/` 系、`search_vault`（`/search/`）、`search_vault_smart`（`/search/smart`）、prompts の一覧（`/vault/Prompts/`） |
 | クエリ文字列 | `search_vault_simple` は `URLSearchParams` |
 
 ### MCP ツール定義
@@ -121,7 +121,7 @@ Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `sha
 対応:
 
 - **失敗はツール結果として返す**。`dispatch` は登録済みツールのハンドラ内で起きた失敗（引数検証も含む）を捕捉し、`toolErrorResult()` で `{ isError: true, content: [{ type: "text", text: <理由> }] }` を返す。JSON-RPC エラーのまま投げるのは**未知のツール名だけ**。MCP 仕様上「引数不正」は本来プロトコルエラーだが、クライアントが文言を潰すので LLM が自力で直せるようあえて結果として返している。
-- **HTTP / ネットワークの説明は 1 か所に集約**。`packages/mcp-server/src/shared/describeApiError.ts` の `describeHttpError(info, status, body)` と `describeNetworkError(info, error)`。ツールごとに書き分けない。`makeRequest` だけが呼ぶので、Local REST API を叩く全ツール（`features/local-rest-api` / `templates` / `prompts` / `smart-connections`）に自動的に効く。`features/fetch` は Local REST API を使わないが、`dispatch` 経由で `isError` にはなる。
+- **HTTP / ネットワークの説明は 1 か所に集約**。`packages/mcp-server/src/shared/describeApiError.ts` の `describeHttpError(info, status, body)` と `describeNetworkError(info, error)`。ツールごとに書き分けない。`makeRequest` だけが呼ぶので、Local REST API を叩く全ツール（`features/local-rest-api` / `templates` / `prompts` / `semantic-search`）に自動的に効く。`features/fetch` は Local REST API を使わないが、`dispatch` 経由で `isError` にはなる。
 - 対応表: 404 → `File not found: <パス>` / `Directory not found: <パス>`（`/active/` なら「開いているファイルが無い」）、401・403 → `Authentication failed` + `OBSIDIAN_API_KEY` の確認を促す、400 → `Bad request` + API が返した `errorCode` / `message` をそのまま透過、405 → `Method not allowed`、409・412 → 事前条件の不一致（`ifMatch`）、5xx → ステータスと本文、接続不能 → `Cannot reach Obsidian Local REST API at <baseUrl>`、TLS → 証明書の再生成か `OBSIDIAN_USE_HTTP=true` を案内、DNS → `OBSIDIAN_HOST` の確認、タイムアウト → `OBSIDIAN_REQUEST_TIMEOUT_MS` の値付きで報告。どれも `Request: <METHOD> <URL>` の行を必ず含める。
 - ネットワークエラーは `cause` を最大 10 段たどって `code` / `name` / `message` を集める。Node 系（`ECONNREFUSED` を `TypeError: fetch failed` が包む）と Bun 系（`ConnectionRefused` / `FailedToOpenSocket`）の両方を見る。
 - **API キーは出力に載せない**。`redactSecrets()` が `process.env.OBSIDIAN_API_KEY` の出現をすべて `***` に置換する。`describeHttpError` / `describeNetworkError` / `describeToolError` の返り値は必ずこれを通っている。
@@ -165,7 +165,7 @@ vault 内パスを URL パスに埋め込む処理を書く・直すときは、
 ### 前提ツール
 
 - ランタイム/バンドラは Bun のみ（`mise.toml`: `bun = "latest"`、README は v1.1.42 以上）。Node は使わない。
-- このマシンには bun 1.4.2 が入っており、`bun install` 済み（2026-09-03 に 1.4.0 で実施）。bun 1.4 は `bun install` のたびに `bun.lock` の GitHub 依存 3 件に integrity ハッシュを追記して差分を出すが、解決バージョンは変わらない。
+- このマシンの bun は 1.4.0（2026-10-27 確認。CI は `latest` で、同日は 1.4.4）。`bun.lock` の GitHub 依存 3 件の integrity ハッシュはすでに lock に入っていて、`bun install` で中身の差分は出ない（以前は 1.4 が毎回追記していた）。`git status` に `bun.lock` が出ても改行コードの違いだけのことがあり、そのときは `git checkout -- bun.lock` で戻す。
 - `.claude/worktrees/` 下の worktree には `node_modules` が無く、そのままだと `shared` がリポジトリ本体の `node_modules/shared`（本体の `packages/shared` への junction）に解決される。worktree で `packages/shared` を変えても `bun run check` / `bun test` / ビルドは本体の古い `shared` を見て通ってしまう。worktree ではまず `bun install` し（`bun.lock` の差分は `git checkout -- bun.lock` で戻す）、`node_modules/shared` が worktree 側を指すことを確かめる。
 - Windows で `link` スクリプトを使う場合、`symlinkSync(..., "dir")` はシンボリックリンク作成権限が要る。権限がなければ後述のコピー方式にする。
 
@@ -204,7 +204,7 @@ cd packages/mcp-server && bun test
 
 テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-06 確認）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
+現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-27 確認。MCP SDK 1.32.2 / arktype 2.2.9）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
 
 ### CI（`.github/workflows/ci.yml`）
 
@@ -221,6 +221,9 @@ cd packages/mcp-server && bun test
 - mcp-server の `package.json` にあった `zod` はコードのどこからも import されていなかったので外した（2026-10-27）。`@modelcontextprotocol/sdk` 1.32 は自分の依存として zod 4 を持つ。
 - Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。**fork では `dependabot.yml` を置くだけでは version updates が動かない**。GitHub の仕様で、リポジトリの Insights → Dependency graph → Dependabot（`https://github.com/DJMIMA/obsidian-mcp-tools/network/updates`）で明示的に有効にする必要がある。2026-10-27 に有効化した。状態と各回のログもこのページで見られる。minor / patch の PR でも中身は大きいことがある（初回は `@modelcontextprotocol/sdk` 1.0.4 → 1.32.2、`arktype` 2.0.0-rc.30 → 2.2.9 が入り、arktype の型変更で `bun run check` が落ちた）。型チェックは `linux` ジョブにしかないので、`windows` だけ通っている PR は型が壊れていることがある。
 - リポジトリの Dependabot alerts（vulnerability alerts）は 2026-10-27 に有効化した。ただし GitHub の dependency graph は `bun.lock` を読まず、各 `package.json` の直接依存を範囲指定のまま拾うだけ（GraphQL の `dependencyGraphManifests` で確認）。推移的な依存（`proxy-addr`、`node-forge` など）はアラートに出ないので、そこは `bun audit` で見る。自動のセキュリティ修正 PR（automated security fixes）は無効のまま。
+- 2026-10-27 時点で開いているアラートは 1 件（high）: npm パッケージ `obsidian-local-rest-api` 2.5.4（< 4.1.3）の「URL エンコードした `%2F` による `/vault/` のパストラバーサル」。これは Local REST API 本体（Obsidian で動くサーバ側）の脆弱性で、実際に動いている本体は 5.4.0 なので該当しない。本プラグインはこの npm パッケージを `getAPI` と型のためだけに使っている。ただしバンドル後の `main.js` に該当コードが入っていないかは未確認。
+- ルート `package.json` にあった `patchedDependencies`（`svelte@5.16.0` 用、svelte の `default` をクライアント版に向けるパッチ）と `caniuse-lite` は 2026-10-27 に外した。パッチは 2025-01 の `87b24a5` で svelte を上げ `bun.config.ts` に `conditions: ["browser", ...]` を足して以来当たっておらず、`caniuse-lite` は依存元が無かった（test-site の browserslist 用と思われる）。外す前後で `main.js` のハッシュは同一。
+- MCP SDK 1.32 / arktype 2.2 で `tools/list` の inputSchema の書き方が変わった（`$schema`: draft 2020-12 が付く、`anyOf` が `enum` / `type` になる）。ツールと引数の顔ぶれ、エラー応答の文言は 1.0.4 / rc.30 のときと同じ（2026-10-27 に旧バイナリと比較）。未知のツールの JSON-RPC エラーは `MCP error -32600: MCP error -32600: Unknown tool: ...` と接頭辞が二重になるが、以前から。
 
 ### vault へのインストール（Windows、この fork の運用）
 
@@ -284,7 +287,7 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-10-06 時点で 179/179 PASS。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-10-27 時点で 179/179 PASS（MCP SDK 1.32.2 / arktype 2.2.9 のバイナリ）。
 
 意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-06 時点で 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
 
