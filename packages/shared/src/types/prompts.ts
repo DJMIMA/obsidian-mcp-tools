@@ -50,12 +50,15 @@ export const PromptExecutionResultSchema = type({
 });
 export type PromptExecutionResult = typeof PromptExecutionResultSchema.infer;
 
+// The keys are only known at runtime, so arktype infers `unknown`. Optional
+// arguments are left out rather than set to undefined, so the validated
+// value is a plain string record.
 export function buildTemplateArgumentsSchema(
   args: PromptParameter[],
-): Type<Record<string, "string" | "string?">, {}> {
+): Type<Record<string, string>, {}> {
   return type(
     Object.fromEntries(
       args.map((arg) => [arg.name, arg.required ? "string" : "string?"]),
     ) as Record<string, "string" | "string?">,
-  );
+  ).as<Record<string, string>>();
 }
