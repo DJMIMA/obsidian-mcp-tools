@@ -21,8 +21,9 @@ permissions:
   contents: read
 
 jobs:
-  # 型チェック・テスト・プラグインのビルドと、Linux 向けサーバのビルドを確かめる
-  linux:
+  # 依存の脆弱性。1 件でもあれば失敗させる。型チェックやテストの結果が隠れないよう別ジョブにしている。
+  # bun audit は bun.lock だけを見るので bun install は要らない
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,11 +33,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # 報告だけ。見つかってもジョブは失敗させず、件数を警告に、全文をジョブの Summary に出す
-      - name: Audit dependencies (report only)
+      - name: Audit dependencies
         run: |
           set +e
           bun audit > audit.txt 2>&1
@@ -62,8 +59,23 @@ jobs:
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ $status -ne 0 ]; then
-            echo "::warning title=bun audit::$summary"
+            echo "::error title=bun audit::$summary"
+            exit $status
           fi
+
+  # 型チェック・テスト・プラグインのビルドと、Linux 向けサーバのビルドを確かめる
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Type check
         run: bun run check
