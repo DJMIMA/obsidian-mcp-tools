@@ -22,7 +22,6 @@
 	"dependencies": {
 		"@types/fs-extra": "^11.0.4",
 		"arktype": "^2.2.9",
-		"express": "^4.21.2",
 		"fs-extra": "^11.4.1",
 		"obsidian-local-rest-api": "^5.3.0",
 		"radash": "^12.1.1",
@@ -33,6 +32,7 @@
 		"svelte-preprocess": "^6.0.5"
 	},
 	"devDependencies": {
+		"@types/express": "^4.17.25",
 		"@types/node": "^16.11.6",
 		"@types/semver": "^7.8.0",
 		"@typescript-eslint/eslint-plugin": "5.29.0",
