@@ -208,20 +208,22 @@ cd packages/mcp-server && bun test
 
 ### CI（`.github/workflows/ci.yml`）
 
-`main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。2 ジョブ：
+`main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。3 ジョブ：
 
-- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun audit`（報告だけ。下記）→ `bun run check` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
+- `audit`（ubuntu）: `bun audit` を回し、1 件でもあれば `::error::` を出して失敗する（2026-10-27 に報告だけから切り替えた）。全文はジョブの Summary に出る。新しい advisory で落ちても型チェックやテストの結果が見えるよう、別ジョブにしてある。`bun audit` は `bun.lock` だけを読むので `bun install` はしない。advisory は時間とともに増えるので、コードを変えていない PR（Dependabot など）でもこのジョブだけ落ちることがある。
+- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun run check` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
 - `windows`: 両パッケージの `bun test` → プラグインのビルド → `build:windows` して `--version` を確認 → `main.js` / `manifest.json` / `packages/mcp-server/dist/mcp-server-windows.exe` を artifact `mcp-tools-windows-<sha>`（14 日保持）に上げる。vault へ手で置くときはここから取ってよい（exe は `bin/mcp-server.exe` にリネーム）。
 
 プラグインのビルドに要る `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` はステップ内でルート `package.json` の版から組む。Actions は `GITHUB_REF_NAME` に `main` や `<PR番号>/merge` を自動で入れるので、上書きしないとマクロの semver `clean()` が `null` を返し、版の代わりに `null` が埋め込まれる。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
 
 ### 依存と脆弱性
 
-- `bun audit`（CI の `linux` ジョブ）: 見つかってもジョブは落とさない。件数を `::warning::` に、全文をジョブの Summary に出す。導入時（2026-10-27）は 135 件（critical 2、high 60、moderate 55、low 18）。PR #7 の minor / patch 更新で 131 件、test-site の削除で 75 件（critical 2、high 41、moderate 26、low 6）、`obsidian-local-rest-api` を 5.3.0 に上げて 51 件（critical 2、high 31、moderate 14、low 4）、次の対応で 0 件になった（2026-10-27）。CI はまだ報告だけで、失敗扱いには切り替えていない。
+- `bun audit`（CI の `audit` ジョブ。1 件でもあれば失敗）: 導入時（2026-10-27）は 135 件（critical 2、high 60、moderate 55、low 18）。PR #7 の minor / patch 更新で 131 件、test-site の削除で 75 件（critical 2、high 41、moderate 26、low 6）、`obsidian-local-rest-api` を 5.3.0 に上げて 51 件（critical 2、high 31、moderate 14、low 4）、次の対応で 0 件になった（2026-10-27）。0 件になったので CI を失敗扱いに切り替えた。
   - 51 件はどれも配布物（`main.js` と mcp-server の exe）に入っていなかった。経路は、obsidian-plugin の `express` 4（型しか使っていない）、MCP SDK → express 5（mcp-server は `server/index.js`・`server/stdio.js`・`types.js` しか import せず express を読まない）、使っていない ESLint（`@typescript-eslint/*` 5.29.0 → eslint 8）、`archiver`（`bun run zip` 用）、`npm-run-all`（`release` の `run-s`）→ `shell-quote`。
   - `bun audit fix` で範囲内の版に上げた（44 件）。obsidian-plugin の `dependencies` から `express` を外し、devDependencies に `@types/express@^4.17.25` を入れた（`Request` / `Response` の `import type` にしか使っていない。外す前後で `main.js` のハッシュは同一）。`bun update shell-quote` で 1.12.0 にした（`audit fix` は 1.9.0 を選ぶが、1.9.0 には別の critical（< 1.11.0）が残る）。
   - `bun audit` は依存に入っているパッケージの全版を並べるので、該当範囲外の版（例: proxy-addr 2.0.8、qs 6.17.0）も表示に混ざる。
-  - ESLint の設定（`packages/obsidian-plugin/.eslintrc`、上流の最初のコミットから）はあるが、`lint` スクリプトも CI のステップも無く、実行されていない。`npm-run-all` は 2018 年の 4.1.5 で更新が止まっている。
+  - ESLint の設定（`packages/obsidian-plugin/.eslintrc`、上流の最初のコミットから）はあるが、`lint` スクリプトも CI のステップも無く、実行されていない。
+- `run-s` はルートの devDependency `npm-run-all2`（2026-10-27 に、2018 年の 4.1.5 で更新の止まった `npm-run-all` から置き換えた。コマンド名は同じ）。mcp-server の `release` は `run-s 'build:*'` と glob を**引用符で囲む**。囲まないと `bun run` のシェル（Bun Shell）が `build:*` を自分でファイル名として展開しようとして `no matches found: build:*` で落ち、`run-s` まで届かない。囲む前は `bun run release`（= `release.yml`）でバイナリを作れない状態だった。`release.yml` はこの fork ではまだ一度も実際には走っていない。
 - mcp-server の `package.json` にあった `zod` はコードのどこからも import されていなかったので外した（2026-10-27）。`@modelcontextprotocol/sdk` 1.32 は自分の依存として zod 4 を持つ。
 - Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。**fork では `dependabot.yml` を置くだけでは version updates が動かない**。GitHub の仕様で、リポジトリの Insights → Dependency graph → Dependabot（`https://github.com/DJMIMA/obsidian-mcp-tools/network/updates`）で明示的に有効にする必要がある。2026-10-27 に有効化した。状態と各回のログもこのページで見られる。minor / patch の PR でも中身は大きいことがある（初回は `@modelcontextprotocol/sdk` 1.0.4 → 1.32.2、`arktype` 2.0.0-rc.30 → 2.2.9 が入り、arktype の型変更で `bun run check` が落ちた）。型チェックは `linux` ジョブにしかないので、`windows` だけ通っている PR は型が壊れていることがある。
 - リポジトリの Dependabot alerts（vulnerability alerts）は 2026-10-27 に有効化した。ただし GitHub の dependency graph は `bun.lock` を読まず、各 `package.json` の直接依存を範囲指定のまま拾うだけ（GraphQL の `dependencyGraphManifests` で確認）。推移的な依存（`proxy-addr`、`node-forge` など）はアラートに出ないので、そこは `bun audit` で見る。自動のセキュリティ修正 PR（automated security fixes）は無効のまま。
