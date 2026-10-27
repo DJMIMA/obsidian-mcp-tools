@@ -103,7 +103,7 @@ export async function getInstallationStatus(
   }
 
   // Check for API key
-  const apiKey = plugin.getLocalRestApiKey();
+  const apiKey = await plugin.getLocalRestApiKey();
   if (!apiKey) {
     return {
       state: "no api key",
