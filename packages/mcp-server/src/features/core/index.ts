@@ -38,9 +38,9 @@ export class ObsidianMcpServer {
       logger.error("Server error", { error });
       console.error("[MCP Tools Error]", error);
     };
-    process.on("SIGINT", async () => {
-      await this.server.close();
-      process.exit(0);
+    process.on("SIGINT", () => {
+      // close が失敗しても終了はする
+      void this.server.close().finally(() => process.exit(0));
     });
   }
 

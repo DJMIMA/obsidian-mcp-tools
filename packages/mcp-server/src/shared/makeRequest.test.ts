@@ -23,8 +23,8 @@ beforeAll(() => {
   process.env.OBSIDIAN_API_KEY = "test-api-key";
 });
 
-afterAll(() => {
-  server.stop(true);
+afterAll(async () => {
+  await server.stop(true);
   for (const key of [
     "OBSIDIAN_USE_HTTP",
     "OBSIDIAN_HOST",
@@ -138,7 +138,7 @@ describe("makeRequest", () => {
     const previousPort = process.env.OBSIDIAN_PORT;
     const closed = Bun.serve({ port: 0, fetch: () => new Response("") });
     const closedPort = closed.port;
-    closed.stop(true);
+    await closed.stop(true);
     process.env.OBSIDIAN_PORT = String(closedPort);
 
     try {

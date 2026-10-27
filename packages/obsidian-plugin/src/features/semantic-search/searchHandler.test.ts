@@ -55,7 +55,7 @@ describe("handleSearch", () => {
     });
     const run = async (filter: object | undefined, d = longHit.deps) => {
       const response = await handleSearch(JSON.stringify({ query: "x", ...(filter ? { filter } : {}) }), d);
-      return (response.body as { results: { text: string; truncated?: boolean; fullChars?: number }[] }).results[0];
+      return (response.body as { results: { text: string; truncated?: boolean; fullChars?: number; [key: string]: unknown }[] }).results[0];
     };
 
     test("cuts to the plugin setting and says how long the section was", async () => {

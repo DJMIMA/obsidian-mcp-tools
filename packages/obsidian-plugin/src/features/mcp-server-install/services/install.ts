@@ -79,7 +79,7 @@ export function downloadFile(
         logger.debug("Cleaning up incomplete download:", {
           outputPath,
           writableFinished: JSON.stringify(fileStream?.writableFinished),
-          error: err instanceof Error ? err.message : String(err),
+          error: err instanceof Error ? err.message : JSON.stringify(err),
         });
         fileStream?.destroy();
         fsp.unlink(outputPath).catch((unlinkError) => {

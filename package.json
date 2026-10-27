@@ -17,12 +17,15 @@
   ],
   "scripts": {
     "check": "bun --filter '*' check",
+    "lint": "eslint",
     "dev": "bun --filter '*' dev",
     "version": "bun scripts/version.ts",
     "release": "bun --filter '*' release",
     "zip": "bun --filter '*' zip"
   },
   "devDependencies": {
-    "npm-run-all2": "^9.0.4"
+    "eslint": "^9.39.5",
+    "npm-run-all2": "^9.0.4",
+    "typescript-eslint": "^8.72.1"
   }
 }

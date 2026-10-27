@@ -51,13 +51,16 @@ export default class McpToolsPlugin extends Plugin {
       // Register endpoints
       this.localRestApi.api
         .addRoute("/search/smart")
-        .post((req, res) => this.semanticSearch.handleSearchRoute(req, res));
+        .post((req, res) => void this.semanticSearch.handleSearchRoute(req, res));
 
+      // どちらのハンドラも内部で例外を捕まえて応答を返すので、Promise は待たない
       this.localRestApi.api
         .addRoute("/templates/execute")
-        .post(this.handleTemplateExecution.bind(this));
+        .post((req, res) => void this.handleTemplateExecution(req, res));
 
       logger.info("MCP Tools Plugin loaded");
+    }).catch((error) => {
+      logger.error("Failed to load Local REST API", { error });
     });
   }
 

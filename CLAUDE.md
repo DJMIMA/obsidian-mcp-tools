@@ -171,7 +171,7 @@ vault 内パスを URL パスに埋め込む処理を書く・直すときは、
 
 ### ルートの scripts（`package.json`）
 
-`check` / `dev` / `release` / `zip` はすべて `bun --filter '*' <script>` で各パッケージへ委譲。ルートに `build` と `test` は**存在しない**（README の `bun run build` はルートでは動かない）。パッケージ単位で実行する。
+`check` / `dev` / `release` / `zip` はすべて `bun --filter '*' <script>` で各パッケージへ委譲。`lint` だけはルートで `eslint` を 1 回走らせる（設定はルートの `eslint.config.mjs`。後述）。ルートに `build` と `test` は**存在しない**（README の `bun run build` はルートでは動かない）。パッケージ単位で実行する。
 
 ### ビルド
 
@@ -202,7 +202,7 @@ cd packages/mcp-server && bun run build:windows
 cd packages/mcp-server && bun test
 ```
 
-テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
+テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。obsidian-plugin の `tsconfig.json` は 2026-10-27 まで `include` が `src/*.ts`（サブディレクトリを含まない）で、`.svelte` からしか読まれない `.ts`（`openFolder.ts`、`confirmIndexing.ts`）とテストが型チェックから漏れていた。`src/**/*.ts` に広げ、そのとき出たテストの型エラー 2 件を直した。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
 現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-27 確認。MCP SDK 1.32.2 / arktype 2.2.9）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
 
@@ -211,7 +211,7 @@ cd packages/mcp-server && bun test
 `main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。3 ジョブ：
 
 - `audit`（ubuntu）: `bun audit` を回し、1 件でもあれば `::error::` を出して失敗する（2026-10-27 に報告だけから切り替えた）。全文はジョブの Summary に出る。新しい advisory で落ちても型チェックやテストの結果が見えるよう、別ジョブにしてある。`bun audit` は `bun.lock` だけを読むので `bun install` はしない。advisory は時間とともに増えるので、コードを変えていない PR（Dependabot など）でもこのジョブだけ落ちることがある。
-- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun run check` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
+- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun run check` → `bun run lint` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
 - `windows`: 両パッケージの `bun test` → プラグインのビルド → `build:windows` して `--version` を確認 → `main.js` / `manifest.json` / `packages/mcp-server/dist/mcp-server-windows.exe` を artifact `mcp-tools-windows-<sha>`（14 日保持）に上げる。vault へ手で置くときはここから取ってよい（exe は `bin/mcp-server.exe` にリネーム）。
 
 プラグインのビルドに要る `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` はステップ内でルート `package.json` の版から組む。Actions は `GITHUB_REF_NAME` に `main` や `<PR番号>/merge` を自動で入れるので、上書きしないとマクロの semver `clean()` が `null` を返し、版の代わりに `null` が埋め込まれる。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
@@ -222,7 +222,9 @@ cd packages/mcp-server && bun test
   - 51 件はどれも配布物（`main.js` と mcp-server の exe）に入っていなかった。経路は、obsidian-plugin の `express` 4（型しか使っていない）、MCP SDK → express 5（mcp-server は `server/index.js`・`server/stdio.js`・`types.js` しか import せず express を読まない）、使っていない ESLint（`@typescript-eslint/*` 5.29.0 → eslint 8）、`archiver`（`bun run zip` 用）、`npm-run-all`（`release` の `run-s`）→ `shell-quote`。
   - `bun audit fix` で範囲内の版に上げた（44 件）。obsidian-plugin の `dependencies` から `express` を外し、devDependencies に `@types/express@^4.17.25` を入れた（`Request` / `Response` の `import type` にしか使っていない。外す前後で `main.js` のハッシュは同一）。`bun update shell-quote` で 1.12.0 にした（`audit fix` は 1.9.0 を選ぶが、1.9.0 には別の critical（< 1.11.0）が残る）。
   - `bun audit` は依存に入っているパッケージの全版を並べるので、該当範囲外の版（例: proxy-addr 2.0.8、qs 6.17.0）も表示に混ざる。
-  - ESLint の設定（`packages/obsidian-plugin/.eslintrc`、上流の最初のコミットから）はあるが、`lint` スクリプトも CI のステップも無く、実行されていない。
+- ESLint（2026-10-27 に導入）: ルートの devDependencies に `eslint` 9 と `typescript-eslint` 8、設定はルートの `eslint.config.mjs`、`bun run lint` で全パッケージの `packages/*/src/**/*.ts` を見る（`.svelte` は対象外）。型情報を使う（`projectService` で各パッケージの `tsconfig.json` を読む）ルールのうち、**tsc では見つからない Promise の扱い漏れ**に絞って `no-floating-promises` / `no-misused-promises` / `await-thenable` / `no-base-to-string` の 4 つだけを有効にしている。`recommendedTypeChecked` を丸ごと当てると 47 件中の大半が `any`・空の型・未使用変数で、ひとりで回すには割に合わなかった。テストでは `await-thenable` を外している（bun:test の型定義は `expect(...).rejects` の matcher を `void` と書いているが、`await` を付けるのが正しい書き方なので誤検知になる）。
+  - 導入時に直したもの: `status.ts` の `getLocalRestApiKey()` に `await` が無く、`if (!apiKey)` が常に偽で、Local REST API に API キーが無くても設定画面が `no api key` を出さなかった（実際のバグ）。ほかに、`main.ts` の `lastValueFrom(...).then(...)` に `.catch` を付けた、Local REST API のルートに渡す async ハンドラを `void` で包んだ（どちらも中で例外を捕まえて応答を返す）、mcp-server の SIGINT ハンドラで `close()` が失敗しても終了するようにした、テストの `server.stop(true)` を `await` した。
+  - 上流から残っていた `packages/obsidian-plugin/.eslintrc` / `.eslintignore` と `@typescript-eslint/*` 5.29.0 は、`lint` スクリプトも CI のステップも無く一度も実行されていなかったので削除した。
 - `run-s` はルートの devDependency `npm-run-all2`（2026-10-27 に、2018 年の 4.1.5 で更新の止まった `npm-run-all` から置き換えた。コマンド名は同じ）。mcp-server の `release` は `run-s 'build:*'` と glob を**引用符で囲む**。囲まないと `bun run` のシェル（Bun Shell）が `build:*` を自分でファイル名として展開しようとして `no matches found: build:*` で落ち、`run-s` まで届かない。囲む前は `bun run release`（= `release.yml`）でバイナリを作れない状態だった。`release.yml` はこの fork ではまだ一度も実際には走っていない。
 - mcp-server の `package.json` にあった `zod` はコードのどこからも import されていなかったので外した（2026-10-27）。`@modelcontextprotocol/sdk` 1.32 は自分の依存として zod 4 を持つ。
 - Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。**fork では `dependabot.yml` を置くだけでは version updates が動かない**。GitHub の仕様で、リポジトリの Insights → Dependency graph → Dependabot（`https://github.com/DJMIMA/obsidian-mcp-tools/network/updates`）で明示的に有効にする必要がある。2026-10-27 に有効化した。状態と各回のログもこのページで見られる。minor / patch の PR でも中身は大きいことがある（初回は `@modelcontextprotocol/sdk` 1.0.4 → 1.32.2、`arktype` 2.0.0-rc.30 → 2.2.9 が入り、arktype の型変更で `bun run check` が落ちた）。型チェックは `linux` ジョブにしかないので、`windows` だけ通っている PR は型が壊れていることがある。

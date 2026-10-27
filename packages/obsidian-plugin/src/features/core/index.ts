@@ -28,7 +28,7 @@ export class McpToolsSettingTab extends PluginSettingTab {
   }
 
   hide(): void {
-    this.component && unmount(this.component);
+    if (this.component) void unmount(this.component);
   }
 }
 

@@ -67,7 +67,7 @@ describe("OpenAI-compatible provider", () => {
     await provider.embed(["a"], "document");
     key = "k2";
     await provider.embed(["a"], "document");
-    expect(requests.map((r) => r.headers.Authorization)).toEqual([undefined, "Bearer k2"]);
+    expect(requests.map((r): string | undefined => r.headers.Authorization)).toEqual([undefined, "Bearer k2"]);
   });
 
   test("vectors of different lengths in one response are a bad response", async () => {

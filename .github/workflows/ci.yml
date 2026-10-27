@@ -63,7 +63,7 @@ jobs:
             exit $status
           fi
 
-  # 型チェック・テスト・プラグインのビルドと、Linux 向けサーバのビルドを確かめる
+  # 型チェック・lint・テスト・プラグインのビルドと、Linux 向けサーバのビルドを確かめる
   linux:
     runs-on: ubuntu-latest
     steps:
@@ -79,6 +79,9 @@ jobs:
 
       - name: Type check
         run: bun run check
+
+      - name: Lint
+        run: bun run lint
 
       - name: Test mcp-server
         working-directory: packages/mcp-server
