@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## アーキテクチャ
 
-Bun workspace のモノレポ。`packages/test-site` は SvelteKit のサイトで、プラグイン/サーバの動作には無関係。
+Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `shared`）。上流にあった `packages/test-site`（`fetch` ツールを手で試すためのダミーのブログ記事ページ、SvelteKit）は、どこからも参照されず依存と脆弱性の大半を占めていたので 2026-10-27 に削除した。
 
 ### 2 つのコンポーネントと通信経路
 
@@ -210,14 +210,15 @@ cd packages/mcp-server && bun test
 
 `main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。2 ジョブ：
 
-- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun audit`（報告だけ。下記）→ `bun run check`（test-site の svelte-check を含む）→ 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
+- `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun audit`（報告だけ。下記）→ `bun run check` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
 - `windows`: 両パッケージの `bun test` → プラグインのビルド → `build:windows` して `--version` を確認 → `main.js` / `manifest.json` / `packages/mcp-server/dist/mcp-server-windows.exe` を artifact `mcp-tools-windows-<sha>`（14 日保持）に上げる。vault へ手で置くときはここから取ってよい（exe は `bin/mcp-server.exe` にリネーム）。
 
 プラグインのビルドに要る `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` はステップ内でルート `package.json` の版から組む。Actions は `GITHUB_REF_NAME` に `main` や `<PR番号>/merge` を自動で入れるので、上書きしないとマクロの semver `clean()` が `null` を返し、版の代わりに `null` が埋め込まれる。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
 
 ### 依存と脆弱性
 
-- `bun audit`（CI の `linux` ジョブ）: 見つかってもジョブは落とさない。件数を `::warning::` に、全文をジョブの Summary に出す。2026-10-27 時点で 135 件（critical 2、high 60、moderate 55、low 18）。大半は test-site（SvelteKit / vite / eslint 系）と開発ツール由来。件数を減らしたら失敗扱いに切り替える。
+- `bun audit`（CI の `linux` ジョブ）: 見つかってもジョブは落とさない。件数を `::warning::` に、全文をジョブの Summary に出す。導入時（2026-10-27）は 135 件（critical 2、high 60、moderate 55、low 18）。PR #7 の minor / patch 更新で 131 件、test-site の削除で 75 件（critical 2、high 41、moderate 26、low 6）になった。件数を減らしたら失敗扱いに切り替える。
+- mcp-server の `package.json` にあった `zod` はコードのどこからも import されていなかったので外した（2026-10-27）。`@modelcontextprotocol/sdk` 1.32 は自分の依存として zod 4 を持つ。
 - Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。**fork では `dependabot.yml` を置くだけでは version updates が動かない**。GitHub の仕様で、リポジトリの Insights → Dependency graph → Dependabot（`https://github.com/DJMIMA/obsidian-mcp-tools/network/updates`）で明示的に有効にする必要がある。2026-10-27 に有効化した。状態と各回のログもこのページで見られる。minor / patch の PR でも中身は大きいことがある（初回は `@modelcontextprotocol/sdk` 1.0.4 → 1.32.2、`arktype` 2.0.0-rc.30 → 2.2.9 が入り、arktype の型変更で `bun run check` が落ちた）。型チェックは `linux` ジョブにしかないので、`windows` だけ通っている PR は型が壊れていることがある。
 - リポジトリの Dependabot alerts（vulnerability alerts）は 2026-10-27 に有効化した。ただし GitHub の dependency graph は `bun.lock` を読まず、各 `package.json` の直接依存を範囲指定のまま拾うだけ（GraphQL の `dependencyGraphManifests` で確認）。推移的な依存（`proxy-addr`、`node-forge` など）はアラートに出ないので、そこは `bun audit` で見る。自動のセキュリティ修正 PR（automated security fixes）は無効のまま。
 
