@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { getAPI, LocalRestApiPublicApi } from "obsidian-local-rest-api";
+import { getAPI, type LocalRestApiPublicApi } from "obsidian-local-rest-api";
 import {
   distinct,
   interval,
