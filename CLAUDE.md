@@ -218,7 +218,7 @@ cd packages/mcp-server && bun test
 ### 依存と脆弱性
 
 - `bun audit`（CI の `linux` ジョブ）: 見つかってもジョブは落とさない。件数を `::warning::` に、全文をジョブの Summary に出す。2026-10-27 時点で 135 件（critical 2、high 60、moderate 55、low 18）。大半は test-site（SvelteKit / vite / eslint 系）と開発ツール由来。件数を減らしたら失敗扱いに切り替える。
-- Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。
+- Dependabot（`.github/dependabot.yml`）: `bun`（ルートの `bun.lock` 1 つでワークスペース全体）と `github-actions` を毎週月曜（JST）に更新。bun の minor / patch は 1 本の PR にまとめ、major は個別。actions は全部まとめて 1 本。**fork では `dependabot.yml` を置くだけでは version updates が動かない**。GitHub の仕様で、リポジトリの Insights → Dependency graph → Dependabot（`https://github.com/DJMIMA/obsidian-mcp-tools/network/updates`）で明示的に有効にする必要がある。2026-10-27 に有効化した。状態と各回のログもこのページで見られる。minor / patch の PR でも中身は大きいことがある（初回は `@modelcontextprotocol/sdk` 1.0.4 → 1.32.2、`arktype` 2.0.0-rc.30 → 2.2.9 が入り、arktype の型変更で `bun run check` が落ちた）。型チェックは `linux` ジョブにしかないので、`windows` だけ通っている PR は型が壊れていることがある。
 - リポジトリの Dependabot alerts（vulnerability alerts）は 2026-10-27 に有効化した。ただし GitHub の dependency graph は `bun.lock` を読まず、各 `package.json` の直接依存を範囲指定のまま拾うだけ（GraphQL の `dependencyGraphManifests` で確認）。推移的な依存（`proxy-addr`、`node-forge` など）はアラートに出ないので、そこは `bun audit` で見る。自動のセキュリティ修正 PR（automated security fixes）は無効のまま。
 
 ### vault へのインストール（Windows、この fork の運用）
