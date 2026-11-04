@@ -7,9 +7,6 @@ import {
 } from "./describeApiError";
 import { logger } from "./logger";
 
-// Disable TLS certificate validation for local self-signed certificates
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 /**
  * Origin of the Obsidian Local REST API.
  *
@@ -79,6 +76,10 @@ export async function makeRequest<
   try {
     response = await fetch(url, {
       ...init,
+      // Local REST API serves a self-signed certificate. Skip verification for
+      // this request only; setting NODE_TLS_REJECT_UNAUTHORIZED would turn it
+      // off for every fetch in the process, the fetch tool's included.
+      tls: { rejectUnauthorized: false },
       ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       headers: {
         Authorization: `Bearer ${API_KEY}`,
@@ -115,11 +116,12 @@ export async function makeRequest<
   if (validated instanceof type.errors) {
     const stackError = new Error();
     Error.captureStackTrace(stackError, makeRequest);
+    // The body is not logged: it is usually note content.
     logger.error("Invalid response from Obsidian API", {
       status: response.status,
+      path,
       error: validated.summary,
       stack: stackError.stack,
-      data,
     });
     throw new ObsidianApiError(
       `The Obsidian Local REST API returned an unexpected response for ${request.method} ${path} (HTTP ${response.status}). ` +

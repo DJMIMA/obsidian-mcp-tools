@@ -5,18 +5,11 @@ export interface SetupResult {
   error?: string;
 }
 
-export interface DownloadProgress {
-  percentage: number;
-  bytesReceived: number;
-  totalBytes: number;
-}
-
 export interface InstallationStatus {
   state:
     | "no api key"
     | "not installed"
     | "installed"
-    | "installing"
     | "outdated"
     | "uninstalling"
     | "error";
@@ -52,6 +45,10 @@ declare module "obsidian" {
         };
         ["templater-obsidian"]?: {
           templater?: Templater.ITemplater;
+          settings?: {
+            templates_folder?: string;
+            user_scripts_folder?: string;
+          };
         };
       };
     };

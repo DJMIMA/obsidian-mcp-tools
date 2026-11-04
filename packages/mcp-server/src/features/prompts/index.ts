@@ -4,6 +4,7 @@ import {
   logger,
   makeRequest,
   parseTemplateParameters,
+  stripFrontmatter,
 } from "$/shared";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
@@ -16,18 +17,17 @@ import { type } from "arktype";
 import {
   buildTemplateArgumentsSchema,
   LocalRestAPI,
+  PROMPTS_FOLDER,
   PromptFrontmatterSchema,
   type PromptMetadata,
 } from "shared";
-
-const PROMPT_DIRNAME = `Prompts`;
 
 export function setupObsidianPrompts(server: Server) {
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
     try {
       const { files } = await makeRequest(
         LocalRestAPI.ApiVaultDirectoryResponse,
-        `/vault/${PROMPT_DIRNAME}/`,
+        `/vault/${PROMPTS_FOLDER}/`,
       );
       const prompts: PromptMetadata[] = (
         await Promise.all(
@@ -38,7 +38,7 @@ export function setupObsidianPrompts(server: Server) {
             // Retrieve frontmatter and content from vault file
             const file = await makeRequest(
               LocalRestAPI.ApiVaultFileResponse,
-              `/vault/${encodeVaultPath(`${PROMPT_DIRNAME}/${filename}`)}`,
+              `/vault/${encodeVaultPath(`${PROMPTS_FOLDER}/${filename}`)}`,
               {
                 headers: { Accept: LocalRestAPI.MIME_TYPE_OLRAPI_NOTE_JSON },
               },
@@ -72,7 +72,7 @@ export function setupObsidianPrompts(server: Server) {
 
   server.setRequestHandler(GetPromptRequestSchema, async ({ params }) => {
     try {
-      const promptFilePath = `${PROMPT_DIRNAME}/${params.name}`;
+      const promptFilePath = `${PROMPTS_FOLDER}/${params.name}`;
 
       // Get prompt content
       const { content: template, frontmatter } = await makeRequest(
@@ -111,8 +111,7 @@ export function setupObsidianPrompts(server: Server) {
         },
       );
 
-      // Using unsafe assertion b/c the last element is always a string
-      const withoutFrontmatter = content.split("---").at(-1)!.trim();
+      const withoutFrontmatter = stripFrontmatter(content);
 
       return {
         messages: [

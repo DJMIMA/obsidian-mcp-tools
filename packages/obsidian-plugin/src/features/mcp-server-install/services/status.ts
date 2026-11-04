@@ -1,6 +1,6 @@
 import type McpToolsPlugin from "$/main";
 import { logger } from "$/shared/logger";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import fsp from "fs/promises";
 import { Plugin } from "obsidian";
 import path from "path";
@@ -9,9 +9,9 @@ import { promisify } from "util";
 import { BINARY_NAME } from "../constants";
 import type { InstallationStatus, InstallPathInfo } from "../types";
 import { getFileSystemAdapter } from "../utils/getFileSystemAdapter";
-import { getPlatform } from "./install";
+import { getPlatform } from "../utils/getPlatform";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Resolves the real path of the given file path, handling cases where the path is a symlink.
@@ -135,8 +135,11 @@ export async function getInstallationStatus(
   // Check server binary version
   let serverVersion: string | null | undefined;
   try {
-    const versionCommand = `"${installPath.path}" --version`;
-    const { stdout } = await execAsync(versionCommand);
+    // execFile runs the binary without a shell, so the vault path is never
+    // parsed as a command line (cmd expands %VAR% even inside quotes).
+    const { stdout } = await execFileAsync(installPath.path, ["--version"], {
+      timeout: 10_000,
+    });
     serverVersion = clean(stdout.trim());
     if (!serverVersion) throw new Error("Invalid server version string");
   } catch {

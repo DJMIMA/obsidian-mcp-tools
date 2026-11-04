@@ -42,9 +42,20 @@ describe("describeHttpError", () => {
     expect(message).toContain("OBSIDIAN_API_KEY");
   });
 
-  test("reports 403 as an authentication failure", () => {
+  test("reports a bare 403 as an authentication failure", () => {
     const message = describeHttpError(req(), 403, "");
     expect(message).toContain("Authentication failed");
+  });
+
+  test("reports a 403 with a reason as a refusal, not an authentication failure", () => {
+    const message = describeHttpError(
+      req({ path: "/templates/execute", method: "POST" }),
+      403,
+      JSON.stringify({ message: 'Only templates inside "Templates/" can be run from MCP' }),
+    );
+    expect(message).toContain("Refused (HTTP 403)");
+    expect(message).toContain('Only templates inside "Templates/"');
+    expect(message).not.toContain("Authentication failed");
   });
 
   test("passes through the errorCode and message the API returned on 400", () => {

@@ -5,6 +5,7 @@
   import type { FeatureStatus } from "..";
   import {
     COHERE_DIMENSIONS,
+    isInsecureRemoteUrl,
     parseExcludeFolders,
     requiresRebuild,
     type SemanticSearchSettings,
@@ -165,6 +166,11 @@
       <label for="ss-oa-url">Base URL</label>
       <input id="ss-oa-url" type="text" placeholder="http://localhost:11434/v1" bind:value={draft.openaiCompatible.baseUrl} />
     </div>
+    {#if isInsecureRemoteUrl(draft.openaiCompatible.baseUrl)}
+      <div class="warning">
+        This is plain http to another machine: note text and the API key would be sent unencrypted. Use https, or http only to this computer (localhost).
+      </div>
+    {/if}
     <div class="row"><span>API key (optional)</span><div bind:this={openaiKeyEl}></div></div>
     <div class="row">
       <label for="ss-oa-model">Model</label>
@@ -274,6 +280,10 @@
   }
   .note {
     color: var(--text-muted);
+  }
+  .warning {
+    color: var(--text-error);
+    margin-bottom: 0.5em;
   }
   .status > div {
     margin-bottom: 0.25em;

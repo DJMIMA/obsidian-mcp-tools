@@ -1,8 +1,3 @@
-import { environmentVariables } from "./bundle-time" with { type: "macro" };
-
-export const { GITHUB_DOWNLOAD_URL, GITHUB_REF_NAME } =
-  environmentVariables();
-
 export const BINARY_NAME = {
   windows: "mcp-server.exe",
   macos: "mcp-server",
@@ -23,6 +18,3 @@ export const LOG_PATH = {
 
 export const PLATFORM_TYPES = ["windows", "macos", "linux"] as const;
 export type Platform = (typeof PLATFORM_TYPES)[number];
-
-export const ARCH_TYPES = ["x64", "arm64"] as const;
-export type Arch = (typeof ARCH_TYPES)[number];

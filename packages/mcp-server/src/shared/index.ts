@@ -10,3 +10,5 @@ export * from "./encodeVaultPath";
 export * from "./buildPatchInstruction";
 export * from "./applyPatch";
 export * from "./resolveHeadingTarget";
+export * from "./writeGuard";
+export * from "./stripFrontmatter";

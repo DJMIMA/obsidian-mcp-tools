@@ -124,11 +124,17 @@ function summariseStatus(
   const { method, path } = info;
   const shown = readablePath(path);
 
-  if (status === 401 || status === 403) {
+  // A wrong key is 401 (40101). A 403 with a reason is a policy refusal, such
+  // as the configuration folder or a template outside the templates folder.
+  if (status === 401 || (status === 403 && !hasDetail)) {
     return (
       `Authentication failed (HTTP ${status}). Check that OBSIDIAN_API_KEY in the MCP server ` +
       "configuration matches the API key in the Obsidian Local REST API plugin settings."
     );
+  }
+
+  if (status === 403) {
+    return `Refused (HTTP 403): ${method} ${shown} is not allowed.`;
   }
 
   if (status === 404) {

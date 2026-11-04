@@ -144,12 +144,11 @@ export class ToolRegistryClass<
           return await handler(validParams, context);
         } catch (error) {
           const formattedError = formatMcpError(error);
+          // Argument values are left out: they are note content.
           logger.error(`Error handling ${params.name}`, {
-            ...formattedError,
             message: formattedError.message,
             stack: formattedError.stack,
-            error,
-            params,
+            argumentNames: Object.keys(params.arguments ?? {}),
           });
           return toolErrorResult(error);
         }
@@ -162,7 +161,6 @@ export class ToolRegistryClass<
     );
     logger.error(`Error handling ${params.name}`, {
       message: unknownTool.message,
-      params,
     });
     throw unknownTool;
   };

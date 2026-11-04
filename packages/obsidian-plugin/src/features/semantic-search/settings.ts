@@ -142,6 +142,23 @@ export function requiresRebuild(a: SemanticSearchSettings, b: SemanticSearchSett
   return fingerprintKey(fingerprintOf(a)) !== fingerprintKey(fingerprintOf(b));
 }
 
+/**
+ * True when `baseUrl` is plain http to another machine, so note text and the
+ * API key would cross the network unencrypted. http to this machine (Ollama,
+ * LM Studio) is fine.
+ */
+export function isInsecureRemoteUrl(baseUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return !(host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host));
+}
+
 export function parseExcludeFolders(text: string): string[] {
   return text
     .split(/\r?\n/)

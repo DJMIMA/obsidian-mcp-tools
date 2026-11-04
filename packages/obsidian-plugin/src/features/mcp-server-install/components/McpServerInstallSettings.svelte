@@ -8,7 +8,6 @@
     removeFromClaudeConfig,
     updateClaudeConfig,
   } from "../services/config";
-  import { installMcpServer } from "../services/install";
   import { getInstallationStatus } from "../services/status";
   import { uninstallServer } from "../services/uninstall";
   import type { InstallationStatus } from "../types";
@@ -28,25 +27,23 @@
     status = await getInstallationStatus(plugin);
   });
 
-  // Handle installation
-  async function handleInstall() {
+  // This fork does not download the server: a binary from another
+  // repository's releases would run unverified. Build it and copy it into the
+  // folder below; this button only writes the Claude Desktop entry for it.
+  async function handleRegister() {
     try {
       const apiKey = await plugin.getLocalRestApiKey();
       if (!apiKey) {
         throw new Error("Local REST API key is not configured");
       }
-
-      status = { ...status, state: "installing" };
-      const installPath = await installMcpServer(plugin);
-
-      // Update Claude config
-      await updateClaudeConfig(plugin, installPath.path, apiKey);
-
-      status = await getInstallationStatus(plugin);
+      if (!status.path) {
+        throw new Error("The MCP server binary was not found");
+      }
+      await updateClaudeConfig(plugin, status.path, apiKey);
+      new Notice("Claude Desktop config updated. Restart Claude Desktop to use it.");
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Installation failed";
-      status = { ...status, state: "error", error: message };
+        error instanceof Error ? error.message : "Could not update the Claude Desktop config";
       new Notice(message);
     }
   }
@@ -54,7 +51,7 @@
   // Handle uninstall
   async function handleUninstall() {
     try {
-      status = { ...status, state: "installing" };
+      status = { ...status, state: "uninstalling" };
       await uninstallServer(plugin);
       await removeFromClaudeConfig();
       status = { ...status, state: "not installed" };
@@ -78,20 +75,23 @@
     <div class="error-message">Please configure the Local REST API plugin</div>
   {:else if status.state === "not installed"}
     <div class="status-message">
-      MCP Server is not installed
-      <button on:click={handleInstall}>Install server</button>
+      MCP Server is not installed. Build it with <code>bun run build:windows</code>
+      in <code>packages/mcp-server</code> and copy
+      <code>dist/mcp-server-windows.exe</code> to
+      <code>{status.path ?? "the server install folder"}</code>.
     </div>
-  {:else if status.state === "installing"}
-    <div class="status-message">Installing MCP server...</div>
   {:else if status.state === "installed"}
     <div class="status-message">
       MCP Server v{status.versions.server} is installed
+      <button on:click={handleRegister}>Register in Claude Desktop</button>
       <button on:click={handleUninstall}>Uninstall</button>
     </div>
   {:else if status.state === "outdated"}
     <div class="status-message">
-      Update available (v{status.versions.server} -> v{status.versions.plugin})
-      <button on:click={handleInstall}>Update</button>
+      The server (v{status.versions.server}) is older than this plugin
+      (v{status.versions.plugin}). Rebuild it from the same commit and replace
+      the binary.
+      <button on:click={handleRegister}>Register in Claude Desktop</button>
     </div>
   {:else if status.state === "uninstalling"}
     <div class="status-message">Uninstalling MCP server...</div>
@@ -120,7 +120,7 @@
 <div class="links">
   <h3>Resources</h3>
 
-  {#if status.path}
+  {#if status.dir}
     <div class="link-item">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <a on:click={() => status.dir && openFolder(status.dir)}>
@@ -138,7 +138,7 @@
 
   <div class="link-item">
     <a
-      href="https://github.com/jacksteamdev/obsidian-mcp-tools"
+      href="https://github.com/DJMIMA/obsidian-mcp-tools"
       target="_blank"
     >
       GitHub repository

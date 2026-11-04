@@ -190,4 +190,10 @@ describe("makeRequest", () => {
       "test-api-key",
     );
   });
+
+  // The self-signed certificate is accepted per request; the process-wide
+  // switch would also turn off verification for the fetch tool.
+  test("does not turn off TLS verification for the whole process", () => {
+    expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined();
+  });
 });

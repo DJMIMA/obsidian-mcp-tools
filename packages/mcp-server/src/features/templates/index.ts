@@ -1,4 +1,6 @@
 import {
+  assertVaultPath,
+  assertWritable,
   encodeVaultPath,
   formatMcpError,
   makeRequest,
@@ -21,9 +23,14 @@ export function registerTemplaterTools(tools: ToolRegistry) {
         },
       ),
     }).describe(
-      'Render a Templater template stored in the vault and return { message, content } with the rendered text. name is the template\'s vault path. arguments supplies the values read by tp.mcpTools.prompt("<argument name>") calls in the template; an argument that is not supplied renders as an empty string. With createFile \'true\' and a targetPath, the output is also saved as a new file; without targetPath nothing is saved.',
+      'Render a Templater template stored in the vault and return { message, content } with the rendered text. name is the template\'s vault path; only templates inside the Templater templates folder or Prompts/ can be run. arguments supplies the values read by tp.mcpTools.prompt("<argument name>") calls in the template; an argument that is not supplied renders as an empty string. With createFile \'true\' and a targetPath, the output is also saved as a new file (not inside the templates, user scripts or Prompts folders); without targetPath nothing is saved.',
     ),
     async ({ arguments: args }) => {
+      if (args.createFile === "true" && args.targetPath) {
+        assertVaultPath(args.targetPath);
+        await assertWritable(args.targetPath);
+      }
+
       // Get prompt content
       const data = await makeRequest(
         LocalRestAPI.ApiVaultFileResponse,

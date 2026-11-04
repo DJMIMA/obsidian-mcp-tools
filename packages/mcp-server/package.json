@@ -16,7 +16,6 @@
     "eval:semantic": "bun scripts/eval-semantic.ts",
     "verify:semantic": "bun scripts/verify-semantic.ts",
     "release": "run-s 'build:*'",
-    "setup": "bun run ./scripts/install.ts",
     "test": "bun test ./src/**/*.test.ts"
   },
   "dependencies": {
