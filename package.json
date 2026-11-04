@@ -27,5 +27,9 @@
     "eslint": "^9.39.5",
     "npm-run-all2": "^9.0.4",
     "typescript-eslint": "^8.72.1"
+  },
+  "overrides": {
+    "glob": "^14.0.3",
+    "minimatch": "^11.0.4"
   }
 }

@@ -15,7 +15,6 @@ export async function setup(plugin: Plugin): Promise<SetupResult> {
 // Re-export types and utilities that should be available to other features
 export { default as FeatureSettings } from "./components/McpServerInstallSettings.svelte";
 export * from "./constants";
-export { updateClaudeConfig } from "./services/config";
-export { installMcpServer } from "./services/install";
+export { removeFromClaudeConfig, updateClaudeConfig } from "./services/config";
 export { uninstallServer } from "./services/uninstall";
 export * from "./types";

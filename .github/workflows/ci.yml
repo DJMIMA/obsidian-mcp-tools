@@ -20,18 +20,23 @@ concurrency:
 permissions:
   contents: read
 
+# action はタグではなくコミット SHA で固定する（タグは付け替えられる）。Dependabot が SHA ごと更新する。
+# Bun も版を固定する。上げるときは release.yml と揃える。
+
 jobs:
   # 依存の脆弱性。1 件でもあれば失敗させる。型チェックやテストの結果が隠れないよう別ジョブにしている。
   # bun audit は bun.lock だけを見るので bun install は要らない
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.4
 
       - name: Audit dependencies
         run: |
@@ -67,12 +72,14 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -91,14 +98,9 @@ jobs:
         working-directory: packages/obsidian-plugin
         run: bun test src
 
-      # bundle-time.ts のマクロはこの 2 変数を必須で読む。GITHUB_REF_NAME は
-      # Actions が "main" などを入れてくるので、ルート package.json の版で上書きする
       - name: Build obsidian-plugin
         working-directory: packages/obsidian-plugin
         run: |
-          VERSION=$(jq -r .version ../../package.json)
-          GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/$VERSION" \
-          GITHUB_REF_NAME="$VERSION" \
           bun run build
           test -s ../../main.js
 
@@ -115,12 +117,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -135,11 +139,7 @@ jobs:
 
       - name: Build obsidian-plugin
         working-directory: packages/obsidian-plugin
-        run: |
-          VERSION=$(jq -r .version ../../package.json)
-          GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/$VERSION" \
-          GITHUB_REF_NAME="$VERSION" \
-          bun bun.config.ts --prod
+        run: bun bun.config.ts --prod
 
       - name: Build mcp-server (windows)
         working-directory: packages/mcp-server
@@ -149,7 +149,7 @@ jobs:
 
       # vault へ手で置く 3 ファイル。bin/mcp-server.exe へはリネームして置く
       - name: Upload build
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-tools-windows-${{ github.sha }}
           path: |

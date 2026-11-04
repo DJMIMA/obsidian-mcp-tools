@@ -1,11 +1,22 @@
 import { type } from "arktype";
 import type { Request, Response } from "express";
-import { Notice, Plugin, TFile } from "obsidian";
+import { normalizePath, Notice, Plugin, TFile } from "obsidian";
 import { lastValueFrom } from "rxjs";
-import { LocalRestAPI, Templater, type PromptArgAccessor } from "shared";
+import {
+  LocalRestAPI,
+  Templater,
+  vaultPathProblem,
+  type PromptArgAccessor,
+} from "shared";
 import { setup as setupCore } from "./features/core";
 import { setup as setupMcpServerInstall } from "./features/mcp-server-install";
 import { SemanticSearchFeature } from "./features/semantic-search";
+import {
+  protectedFolders,
+  targetRefusal,
+  templateRefusal,
+  type TemplaterFolders,
+} from "./features/templates/policy";
 import {
   loadLocalRestAPI,
   loadTemplaterAPI,
@@ -22,6 +33,9 @@ export default class McpToolsPlugin extends Plugin {
     required: true,
     installed: false,
   };
+
+  /** The template run in progress; the next one waits for it (see handleTemplateExecution). */
+  private templateRun: Promise<unknown> = Promise.resolve();
 
   async getLocalRestApiKey(): Promise<string | undefined> {
     // The API key is stored in the plugin's settings
@@ -48,7 +62,7 @@ export default class McpToolsPlugin extends Plugin {
         return;
       }
 
-      // Register endpoints
+      // Register endpoints. addRoute requires the API key, like Local REST API's own routes.
       this.localRestApi.api
         .addRoute("/search/smart")
         .post((req, res) => void this.semanticSearch.handleSearchRoute(req, res));
@@ -58,12 +72,33 @@ export default class McpToolsPlugin extends Plugin {
         .addRoute("/templates/execute")
         .post((req, res) => void this.handleTemplateExecution(req, res));
 
+      // The MCP server refuses writes into these folders; see protectedFolders.
+      this.localRestApi.api
+        .addRoute("/mcp-tools/protected-folders")
+        .get((_req, res) => {
+          res.json({ folders: protectedFolders(this.templaterFolders()) });
+        });
+
       logger.info("MCP Tools Plugin loaded");
     }).catch((error) => {
       logger.error("Failed to load Local REST API", { error });
     });
   }
 
+  private templaterFolders(): TemplaterFolders {
+    const settings = this.app.plugins.plugins["templater-obsidian"]?.settings;
+    return {
+      templates: settings?.templates_folder,
+      userScripts: settings?.user_scripts_folder,
+    };
+  }
+
+  /**
+   * Renders a template for the MCP server. Templater runs a template's
+   * contents as JavaScript with Obsidian's full access, so only templates in
+   * the Templater templates folder or Prompts/ are run (the MCP server cannot
+   * write to either), and the output is never saved into those folders.
+   */
   private async handleTemplateExecution(req: Request, res: Response) {
     try {
       const { api: templater } = await lastValueFrom(loadTemplaterAPI(this));
@@ -74,7 +109,7 @@ export default class McpToolsPlugin extends Plugin {
         );
         logger.error("Templater plugin is not available");
         res.status(503).json({
-          error: "Templater plugin is not available",
+          message: "Templater plugin is not available",
         });
         return;
       }
@@ -83,63 +118,55 @@ export default class McpToolsPlugin extends Plugin {
       const params = LocalRestAPI.ApiTemplateExecutionParams(req.body);
 
       if (params instanceof type.errors) {
-        const response = {
-          error: "Invalid request body",
-          body: req.body,
-          summary: params.summary,
-        };
-        logger.debug("Invalid request body", response);
-        res.status(400).json(response);
+        logger.debug("Invalid request body", { summary: params.summary });
+        res.status(400).json({
+          message: `Invalid request body: ${params.summary}`,
+        });
+        return;
+      }
+
+      const nameProblem = vaultPathProblem(params.name);
+      if (nameProblem) {
+        res.status(400).json({
+          message: `Refused template path "${params.name}": ${nameProblem}.`,
+        });
         return;
       }
 
       // Get prompt content from vault
       const templateFile = this.app.vault.getAbstractFileByPath(params.name);
       if (!(templateFile instanceof TFile)) {
-        logger.debug("Template file not found", {
-          params,
-          templateFile,
-        });
+        logger.debug("Template file not found", { name: params.name });
         res.status(404).json({
-          error: `File not found: ${params.name}`,
+          message: `File not found: ${params.name}`,
         });
         return;
       }
 
-      const config = templater.create_running_config(
-        templateFile,
-        templateFile,
-        Templater.RunMode.CreateNewFromTemplate,
+      const saveTo =
+        params.createFile && params.targetPath ? params.targetPath : null;
+      const folders = this.templaterFolders();
+      const refusal =
+        templateRefusal(templateFile.path, folders) ??
+        (saveTo === null ? null : targetRefusal(saveTo, folders));
+      if (refusal) {
+        logger.info("Refused template execution", { refusal });
+        res.status(403).json({ message: refusal });
+        return;
+      }
+
+      // Templater has one functions generator, patched for the length of a
+      // run; overlapping runs would see each other's arguments and restore the
+      // wrong generator, so they go one at a time.
+      const run = this.templateRun.then(() =>
+        this.renderTemplate(templater, templateFile, params.arguments),
       );
-
-      const prompt: PromptArgAccessor = (argName: string) => {
-        return params.arguments[argName] ?? "";
-      };
-
-      const oldGenerateObject =
-        templater.functions_generator.generate_object.bind(
-          templater.functions_generator,
-        );
-
-      // Override generate_object to inject arg into user functions
-      templater.functions_generator.generate_object = async function (
-        config,
-        functions_mode,
-      ) {
-        const functions = await oldGenerateObject(config, functions_mode);
-        Object.assign(functions, { mcpTools: { prompt } });
-        return functions;
-      };
-
-      // Process template with variables
-      const processedContent = await templater.read_and_parse_template(config);
-
-      // Restore original functions generator
-      templater.functions_generator.generate_object = oldGenerateObject;
+      this.templateRun = run.catch(() => undefined);
+      const processedContent = await run;
 
       // Create new file if requested
-      if (params.createFile && params.targetPath) {
-        await this.app.vault.create(params.targetPath, processedContent);
+      if (saveTo !== null) {
+        await this.app.vault.create(normalizePath(saveTo), processedContent);
         res.json({
           message: "Prompt executed and file created successfully",
           content: processedContent,
@@ -152,14 +179,45 @@ export default class McpToolsPlugin extends Plugin {
         content: processedContent,
       });
     } catch (error) {
-      logger.error("Prompt execution error:", {
-        error: error instanceof Error ? error.message : error,
-        body: req.body,
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error("Prompt execution error:", { error: message });
+      res.status(500).json({
+        message: `An error occurred while processing the prompt: ${message}`,
       });
-      res.status(503).json({
-        error: "An error occurred while processing the prompt",
-      });
-      return;
+    }
+  }
+
+  /** Renders `templateFile` with `tp.mcpTools.prompt(name)` returning `args[name]`. */
+  private async renderTemplate(
+    templater: Templater.ITemplater,
+    templateFile: TFile,
+    args: Record<string, string>,
+  ): Promise<string> {
+    const config = templater.create_running_config(
+      templateFile,
+      templateFile,
+      Templater.RunMode.CreateNewFromTemplate,
+    );
+
+    const prompt: PromptArgAccessor = (argName: string) => {
+      return args[argName] ?? "";
+    };
+
+    const generator = templater.functions_generator;
+    const original = generator.generate_object;
+
+    // Override generate_object to inject arg into user functions
+    generator.generate_object = async function (config, functions_mode) {
+      const functions = await original.call(generator, config, functions_mode);
+      Object.assign(functions, { mcpTools: { prompt } });
+      return functions;
+    };
+
+    try {
+      return await templater.read_and_parse_template(config);
+    } finally {
+      // Restore it even when the template throws, so user-run templates never see mcpTools
+      generator.generate_object = original;
     }
   }
 

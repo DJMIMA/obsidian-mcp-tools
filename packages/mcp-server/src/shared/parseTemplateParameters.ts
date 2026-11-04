@@ -67,7 +67,10 @@ export function parseTemplateParameters(content: string): PromptParameter[] {
         },
       });
     } catch (error) {
-      logger.error("Error parsing code", { code, error });
+      // The tag's code is template content, so only the parser's message is logged.
+      logger.debug("Skipped a Templater tag that is not valid JavaScript", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       continue;
     }
   }

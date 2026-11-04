@@ -54,11 +54,16 @@ export class ObsidianMcpServer {
 
     this.server.setRequestHandler(ListToolsRequestSchema, this.tools.list);
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      logger.debug("Handling request", { request });
+      const started = performance.now();
       const response = await this.tools.dispatch(request.params, {
         server: this.server,
       });
-      logger.debug("Request handled", { response });
+      // Arguments and results are note content, so only their shape is logged.
+      logger.debug("Tool call", {
+        tool: request.params.name,
+        ms: Math.round(performance.now() - started),
+        isError: "isError" in response && response.isError === true,
+      });
       return response;
     });
   }

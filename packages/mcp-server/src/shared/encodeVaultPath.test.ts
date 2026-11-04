@@ -35,4 +35,38 @@ describe("encodeVaultPath", () => {
   test("never emits %2F", () => {
     expect(encodeVaultPath("a/b/c.md")).not.toContain("%2F");
   });
+
+  // fetch resolves dot segments before sending, so "../commands/x" would
+  // reach POST /commands/x instead of a file.
+  test.each([
+    "../commands/app:reload",
+    "../active/",
+    "Prompts/../secret.md",
+    "a/./b.md",
+    "..",
+  ])("refuses dot segments: %s", (path) => {
+    expect(() => encodeVaultPath(path)).toThrow("Refused vault path");
+  });
+
+  test.each([
+    ".obsidian/plugins/obsidian-local-rest-api/data.json",
+    ".git/hooks/post-commit",
+    "notes/.claude/settings.json",
+    ".hidden.md",
+  ])("refuses hidden files and folders: %s", (path) => {
+    expect(() => encodeVaultPath(path)).toThrow("hidden file or folder");
+  });
+
+  test.each([
+    ["..\\..\\outside.md", "backslash"],
+    ["C:/Windows/win.ini", "':'"],
+    ["a\u0000b.md", "control character"],
+    ["TEMPLA~1/x.md", "short (8.3) name"],
+  ])("refuses %s", (path, reason) => {
+    expect(() => encodeVaultPath(path)).toThrow(reason);
+  });
+
+  test("allows dots inside names", () => {
+    expect(encodeVaultPath("v1.2/notes.v2.md")).toBe("v1.2/notes.v2.md");
+  });
 });

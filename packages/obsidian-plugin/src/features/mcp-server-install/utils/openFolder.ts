@@ -1,21 +1,21 @@
 import { logger } from "$/shared/logger";
-import { exec } from "child_process";
-import { Notice, Platform } from "obsidian";
+import { Notice } from "obsidian";
+
+/** Electron's shell, which Obsidian's renderer can require. Only openPath is used. */
+const { shell } = require("electron") as {
+  shell: { openPath(path: string): Promise<string> };
+};
 
 /**
- * Opens a folder in the system's default file explorer
+ * Opens a folder in the system's file explorer. Electron passes the path to
+ * the OS directly, so unlike a shell command, characters in it (%, $, quotes)
+ * are never interpreted.
  */
 export function openFolder(folderPath: string): void {
-  const command = Platform.isWin
-    ? `start "" "${folderPath}"`
-    : Platform.isMacOS
-      ? `open "${folderPath}"`
-      : `xdg-open "${folderPath}"`;
-
-  exec(command, (error: Error | null) => {
+  void shell.openPath(folderPath).then((error) => {
     if (error) {
-      const message = `Failed to open folder: ${error.message}`;
-      logger.error(message, { folderPath, error });
+      const message = `Failed to open folder: ${error}`;
+      logger.error(message, { folderPath });
       new Notice(message);
     }
   });

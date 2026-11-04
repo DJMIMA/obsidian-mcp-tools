@@ -282,6 +282,16 @@ export const ApiTemplateExecutionResponse = type({
   content: "string",
 });
 
+/**
+ * Folders whose files Templater runs as code: the templates folder, the user
+ * scripts folder and the prompts folder. MCP tools must not change them.
+ * Content-Type: application/json
+ * GET /mcp-tools/protected-folders (added by this plugin)
+ */
+export const ApiProtectedFoldersResponse = type({
+  folders: "string[]",
+});
+
 // Export types for TypeScript usage
 export type ApiErrorType = typeof ApiError.infer;
 export type ApiNoteJsonType = typeof ApiNoteJson.infer;

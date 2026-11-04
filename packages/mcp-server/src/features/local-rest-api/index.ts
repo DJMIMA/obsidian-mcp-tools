@@ -1,5 +1,7 @@
 import {
+  activeFilePath,
   applyPatch,
+  assertWritable,
   encodeVaultPath,
   makeRequest,
   type ToolRegistry,
@@ -12,6 +14,16 @@ import { formatVaultListing } from "./formatVaultListing";
 const vaultFilename = type("string").describe(
   "Path of the file relative to the vault root, including the extension, e.g. 'Projects/Plan.md'",
 );
+
+const PROTECTED_NOTE =
+  " Files in the Templater templates folder, the Templater user scripts folder and Prompts/ cannot be changed, because Templater runs them as code.";
+
+/** Resolves the open file and checks it may be changed; writes then go to that path, not to /active/. */
+async function writableActiveFile(): Promise<{ path: string; endpoint: string }> {
+  const path = await activeFilePath();
+  await assertWritable(path);
+  return { path, endpoint: `/vault/${encodeVaultPath(path)}` };
+}
 
 export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
   // GET Status
@@ -66,15 +78,17 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: "string",
       },
     }).describe(
-      "Replace the entire content of the file currently open in Obsidian with the given content; anything not included is lost. To change one section use patch_active_file, and to add to the end use append_to_active_file. Fails if no file is open.",
+      "Replace the entire content of the file currently open in Obsidian with the given content; anything not included is lost. To change one section use patch_active_file, and to add to the end use append_to_active_file. Fails if no file is open." +
+        PROTECTED_NOTE,
     ),
     async ({ arguments: args }) => {
-      await makeRequest(LocalRestAPI.ApiNoContentResponse, "/active/", {
+      const { path, endpoint } = await writableActiveFile();
+      await makeRequest(LocalRestAPI.ApiNoContentResponse, endpoint, {
         method: "PUT",
         body: args.content,
       });
       return {
-        content: [{ type: "text", text: "File updated successfully" }],
+        content: [{ type: "text", text: `File updated successfully: ${path}` }],
       };
     },
   );
@@ -86,14 +100,17 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       arguments: {
         content: "string",
       },
-    }).describe("Append content to the end of the currently-open note."),
+    }).describe(
+      "Append content to the end of the currently-open note." + PROTECTED_NOTE,
+    ),
     async ({ arguments: args }) => {
-      await makeRequest(LocalRestAPI.ApiNoContentResponse, "/active/", {
+      const { path, endpoint } = await writableActiveFile();
+      await makeRequest(LocalRestAPI.ApiNoContentResponse, endpoint, {
         method: "POST",
         body: args.content,
       });
       return {
-        content: [{ type: "text", text: "Content appended successfully" }],
+        content: [{ type: "text", text: `Content appended successfully: ${path}` }],
       };
     },
   );
@@ -104,10 +121,13 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       name: '"patch_active_file"',
       arguments: LocalRestAPI.ApiPatchParameters,
     }).describe(
-      "Insert, replace, or delete content in the currently-open note relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
+      "Insert, replace, or delete content in the currently-open note relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target." +
+        PROTECTED_NOTE,
     ),
-    async ({ arguments: args }) =>
-      applyPatch("/active/", "the active file", args),
+    async ({ arguments: args }) => {
+      const { path, endpoint } = await writableActiveFile();
+      return applyPatch(endpoint, `the active file (${path})`, args);
+    },
   );
 
   // DELETE Active File
@@ -115,13 +135,14 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
     type({
       name: '"delete_active_file"',
       arguments: "Record<string, unknown>",
-    }).describe("Delete the currently-active file in Obsidian."),
+    }).describe("Delete the currently-active file in Obsidian." + PROTECTED_NOTE),
     async () => {
-      await makeRequest(LocalRestAPI.ApiNoContentResponse, "/active/", {
+      const { path, endpoint } = await writableActiveFile();
+      await makeRequest(LocalRestAPI.ApiNoContentResponse, endpoint, {
         method: "DELETE",
       });
       return {
-        content: [{ type: "text", text: "File deleted successfully" }],
+        content: [{ type: "text", text: `File deleted successfully: ${path}` }],
       };
     },
   );
@@ -292,12 +313,15 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         content: "string",
       },
     }).describe(
-      "Create a file, or overwrite it if it already exists: the whole file is replaced with the given content. Missing parent folders are created. To change part of an existing file use patch_vault_file, and to add to the end use append_to_vault_file.",
+      "Create a file, or overwrite it if it already exists: the whole file is replaced with the given content. Missing parent folders are created. To change part of an existing file use patch_vault_file, and to add to the end use append_to_vault_file." +
+        PROTECTED_NOTE,
     ),
     async ({ arguments: args }) => {
+      const path = `/vault/${encodeVaultPath(args.filename)}`;
+      await assertWritable(args.filename);
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
+        path,
         {
           method: "PUT",
           body: args.content,
@@ -317,11 +341,13 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         filename: vaultFilename,
         content: "string",
       },
-    }).describe("Append content to a new or existing file."),
+    }).describe("Append content to a new or existing file." + PROTECTED_NOTE),
     async ({ arguments: args }) => {
+      const path = `/vault/${encodeVaultPath(args.filename)}`;
+      await assertWritable(args.filename);
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
+        path,
         {
           method: "POST",
           body: args.content,
@@ -341,14 +367,14 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
         filename: vaultFilename,
       }).and(LocalRestAPI.ApiPatchParameters),
     }).describe(
-      "Insert, replace, or delete content in a file relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target.",
+      "Insert, replace, or delete content in a file relative to a heading, block reference, or frontmatter field. One instruction per call: an operation applied to a scope of a target." +
+        PROTECTED_NOTE,
     ),
-    async ({ arguments: args }) =>
-      applyPatch(
-        `/vault/${encodeVaultPath(args.filename)}`,
-        args.filename,
-        args,
-      ),
+    async ({ arguments: args }) => {
+      const path = `/vault/${encodeVaultPath(args.filename)}`;
+      await assertWritable(args.filename);
+      return applyPatch(path, args.filename, args);
+    },
   );
 
   // DELETE Vault File Content
@@ -358,11 +384,13 @@ export function registerLocalRestApiTools(tools: ToolRegistry, server: Server) {
       arguments: {
         filename: vaultFilename,
       },
-    }).describe("Delete a file from your vault."),
+    }).describe("Delete a file from your vault." + PROTECTED_NOTE),
     async ({ arguments: args }) => {
+      const path = `/vault/${encodeVaultPath(args.filename)}`;
+      await assertWritable(args.filename);
       await makeRequest(
         LocalRestAPI.ApiNoContentResponse,
-        `/vault/${encodeVaultPath(args.filename)}`,
+        path,
         {
           method: "DELETE",
         },

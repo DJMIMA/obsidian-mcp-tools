@@ -18,7 +18,7 @@
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 
 const serverPath =
@@ -249,6 +249,56 @@ for (const [step, run, expect] of errorSteps) {
     ? outcome.text.replace(/\s+/g, " ").slice(0, 60)
     : outcome.error.replace(/\s+/g, " ").slice(0, 100);
   rows.push(["e", "エラー識別", step, pass ? "PASS" : "FAIL", detail]);
+}
+
+// --- phase 4: what a prompt-injected model must not be able to do ---
+// Needs the plugin from the same commit (its /mcp-tools/protected-folders route).
+const NOT_A_TEMPLATE = `${BASE}/not-a-template.md`;
+// A template in an executable folder must still run. MCP cannot write there, so
+// the fixture goes onto disk directly; Prompts/ is executable whatever Templater's
+// template folder is. The folder is removed again if this script created it.
+const TEMPLATE = "Prompts/_mcp-tools-test-template.md";
+const promptsDir = vaultRoot ? resolve(vaultRoot, "Prompts") : undefined;
+const promptsDirExisted = promptsDir ? existsSync(promptsDir) : true;
+async function writeTemplateFixture(): Promise<Outcome> {
+  if (!vaultRoot || !promptsDir) return { ok: false, error: "vault root unknown" };
+  mkdirSync(promptsDir, { recursive: true });
+  writeFileSync(resolve(vaultRoot, TEMPLATE), 'Hello <% tp.mcpTools.prompt("name") %>!\n');
+  // Wait for Obsidian to index the new file.
+  for (let i = 0; i < 20; i++) {
+    const seen = await callWithEnv({}, "get_vault_file", { filename: TEMPLATE });
+    if (seen.ok) return seen;
+    await Bun.sleep(500);
+  }
+  return { ok: false, error: "Obsidian did not pick up the fixture within 10 s" };
+}
+async function removeTemplateFixture(): Promise<Outcome> {
+  if (!vaultRoot || !promptsDir) return { ok: false, error: "vault root unknown" };
+  rmSync(resolve(vaultRoot, TEMPLATE), { force: true });
+  if (!promptsDirExisted && readdirSync(promptsDir).length === 0) rmSync(promptsDir, { recursive: true });
+  return { ok: true, text: "removed" };
+}
+const securitySteps: [string, () => Promise<Outcome>, (o: Outcome) => boolean][] = [
+  ["'..' cannot reach another endpoint", () => callWithEnv({}, "append_to_vault_file", { filename: "../commands/app:reload", content: "" }), (o) => !o.ok && /'\.\.'/.test(o.error)],
+  [".obsidian is not readable", () => callWithEnv({}, "get_vault_file", { filename: ".obsidian/plugins/obsidian-local-rest-api/data.json" }), (o) => !o.ok && /hidden file or folder/.test(o.error) && noLeak(o)],
+  ["Prompts/ is read-only", () => callWithEnv({}, "create_vault_file", { filename: "Prompts/_mcp-tools-test.md", content: "x" }), (o) => !o.ok && /inside "Prompts"/.test(o.error)],
+  ["fixture outside templates", () => callWithEnv({}, "create_vault_file", { filename: NOT_A_TEMPLATE, content: "<% 1 + 1 %>" }), (o) => o.ok],
+  ["a note outside templates does not run", () => callWithEnv({}, "execute_template", { name: NOT_A_TEMPLATE, arguments: {} }), (o) => !o.ok && /Only templates inside/.test(o.error)],
+  ["delete fixture", () => callWithEnv({}, "delete_vault_file", { filename: NOT_A_TEMPLATE }), (o) => o.ok],
+  ["template fixture in Prompts/ (on disk)", writeTemplateFixture, (o) => o.ok],
+  ["a template in Prompts/ runs with its argument", () => callWithEnv({}, "execute_template", { name: TEMPLATE, arguments: { name: "verify" } }), (o) => o.ok && o.text.includes("Hello verify!")],
+  ["its output cannot be saved into Prompts/", () => callWithEnv({}, "execute_template", { name: TEMPLATE, arguments: { name: "x" }, createFile: "true", targetPath: "Prompts/_mcp-tools-test-out.md" }), (o) => !o.ok && /inside "Prompts"/.test(o.error)],
+  ["remove template fixture", removeTemplateFixture, (o) => o.ok],
+  ["fetch cannot read local files", () => callWithEnv({}, "fetch", { url: "file:///C:/Windows/win.ini" }), (o) => !o.ok && /Only http and https/.test(o.error)],
+];
+for (const [step, run, expect] of securitySteps) {
+  const outcome = await run();
+  const pass = expect(outcome);
+  if (!pass) failures++;
+  const detail = outcome.ok
+    ? outcome.text.replace(/\s+/g, " ").slice(0, 60)
+    : outcome.error.replace(/\s+/g, " ").slice(0, 100);
+  rows.push(["s", "安全策", step, pass ? "PASS" : "FAIL", detail]);
 }
 
 // --- remove the empty test directory tree left in the vault ---

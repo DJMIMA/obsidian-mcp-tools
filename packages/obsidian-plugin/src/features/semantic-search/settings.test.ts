@@ -5,6 +5,7 @@ import {
   fingerprintOf,
   isConfigured,
   isExcluded,
+  isInsecureRemoteUrl,
   modelLabel,
   parseExcludeFolders,
   requiresRebuild,
@@ -117,5 +118,24 @@ describe("isConfigured", () => {
 describe("parseExcludeFolders", () => {
   test("one prefix per line, blanks dropped", () => {
     expect(parseExcludeFolders(" Private/ \n\nArchive/\r\n")).toEqual(["Private/", "Archive/"]);
+  });
+});
+
+describe("isInsecureRemoteUrl", () => {
+  test("flags plain http to another machine", () => {
+    expect(isInsecureRemoteUrl("http://192.168.1.20:11434/v1")).toBe(true);
+    expect(isInsecureRemoteUrl("http://embeddings.example.com/v1")).toBe(true);
+  });
+
+  test("accepts https and http to this computer", () => {
+    expect(isInsecureRemoteUrl("https://api.example.com/v1")).toBe(false);
+    expect(isInsecureRemoteUrl("http://localhost:11434/v1")).toBe(false);
+    expect(isInsecureRemoteUrl("http://127.0.0.1:1234/v1")).toBe(false);
+    expect(isInsecureRemoteUrl("http://[::1]:1234/v1")).toBe(false);
+  });
+
+  test("an empty or unparsable field is not flagged", () => {
+    expect(isInsecureRemoteUrl("")).toBe(false);
+    expect(isInsecureRemoteUrl("localhost:11434")).toBe(false);
   });
 });
