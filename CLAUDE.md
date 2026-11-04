@@ -23,30 +23,30 @@ Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `sha
 
 プラグインとサーバは**直接通信しない**。プラグインがサーバを子プロセスとして起動することもない。
 
-1. プラグインの設定画面 (`features/mcp-server-install/components/McpServerInstallSettings.svelte`) の「Install Server」が、`services/install.ts` でバイナリを GitHub Releases からダウンロードして `{vault}/.obsidian/plugins/mcp-tools/bin/mcp-server.exe`（Windows。`constants/index.ts` の `BINARY_NAME`）へ置く。ダウンロード URL は `constants/bundle-time.ts` のマクロで**ビルド時に埋め込まれる** `GITHUB_DOWNLOAD_URL`（= `https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/<version>`、`bun.config.ts` の `define`）。つまりこの fork をそのままビルドしても「Install Server」は上流の archive 済みリリースを取りに行く。fork では自前ビルドのバイナリを手で置く運用になる（後述）。
-2. 同じ流れで `services/config.ts` が Claude Desktop の設定ファイル（Windows: `%APPDATA%\Claude\claude_desktop_config.json`）に `mcpServers["obsidian-mcp-tools"] = { command: <バイナリの絶対パス>, env: { OBSIDIAN_API_KEY } }` を書き込む。API キーは Local REST API プラグインの設定から読む (`main.ts` の `getLocalRestApiKey()` → `app.plugins.plugins["obsidian-local-rest-api"].settings.apiKey`)。
+1. バイナリは自前でビルドして `{vault}/.obsidian/plugins/mcp-tools/bin/mcp-server.exe`（Windows。`constants/index.ts` の `BINARY_NAME`）へ手で置く（後述）。上流にあった「Install Server」/「Update」ボタン（`services/install.ts` が上流 jacksteamdev の GitHub Releases からハッシュ検証なしでダウンロードし、設定画面を開くたびに実行していた）は 2026-11-04 に削除した。ビルド時マクロ `constants/bundle-time.ts` と、プラグインのビルドに必須だった環境変数 `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` もなくなった。設定画面 (`features/mcp-server-install/components/McpServerInstallSettings.svelte`) はバイナリの有無と版を表示し、置き場所と手順を示す。
+2. 設定画面の「Register in Claude Desktop」で `services/config.ts` が Claude Desktop の設定ファイル（Windows: `%APPDATA%\Claude\claude_desktop_config.json`）に `mcpServers["obsidian-mcp-tools"] = { command: <バイナリの絶対パス>, env: { OBSIDIAN_API_KEY } }` を書き込む。API キーは Local REST API プラグインの設定から読む (`main.ts` の `getLocalRestApiKey()` → `app.plugins.plugins["obsidian-local-rest-api"].settings.apiKey`)。
 3. 実行時は Claude Desktop 等の MCP クライアントがバイナリを起動し、バイナリが HTTP(S) で Local REST API に接続する。
-4. プラグイン側は Local REST API の `getAPI(...).addRoute()` で 2 本のルートを Local REST API 上に追加している (`main.ts`)：`POST /search/smart`（本プラグインの埋め込み索引による意味検索。後述）と `POST /templates/execute`（Templater 実行）。この 2 つのエンドポイントは Local REST API 本体ではなく本プラグインが Obsidian 内で処理している。
-5. `services/uninstall.ts` は Claude 設定のパスを macOS 固定 (`Library/Application Support/Claude/...`) で組んでおり `CLAUDE_CONFIG_PATH` を使っていない。Windows ではアンインストール時に設定エントリが消えない。
+4. プラグイン側は Local REST API の `getAPI(...).addRoute()` で 3 本のルートを Local REST API 上に追加している (`main.ts`)：`POST /search/smart`（本プラグインの埋め込み索引による意味検索。後述）、`POST /templates/execute`（Templater 実行）、`GET /mcp-tools/protected-folders`（MCP が書き込めないフォルダの一覧。「Templater が実行するフォルダは MCP から書き込めない」の節）。どれも Local REST API 本体ではなく本プラグインが Obsidian 内で処理している。`addRoute` のルートは Local REST API 自身のルートと同じく API キーが要る（`obsidian-local-rest-api` の `publicApi.d.ts` に明記。キーなしで開けるのは `addPublicRoute`）。実機でも `/mcp-tools/protected-folders` はキーなしで 401 だった（2026-11-04）。
+5. 「Uninstall」は `services/uninstall.ts` がバイナリを消し、設定画面が `removeFromClaudeConfig()`（`CLAUDE_CONFIG_PATH` で各 OS のパスを組む）で Claude 設定のエントリを消す。`uninstall.ts` にあった macOS 固定パスでの重複処理は削除した。
 
 ### Local REST API への HTTP クライアント層
 
 クライアントは `packages/mcp-server/src/shared/makeRequest.ts` の `makeRequest(schema, path, init)` 1 本に集約されている。
 
 - ベース URL: `getBaseUrl()` が**呼び出しのたびに**環境変数から組み立てる。既定は `https://127.0.0.1:27124`。`OBSIDIAN_USE_HTTP=true` で `http://...:27123`、`OBSIDIAN_HOST` でホスト、`OBSIDIAN_PORT` でポートを変更できる（`OBSIDIAN_PORT` は 2026-09-08 に追加。テストがローカルのスタブサーバへ向けるために使う）。
-- 自己署名証明書対策で `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` をモジュール読み込み時に設定。
+- 自己署名証明書対策で、`makeRequest` の `fetch` にだけ `tls: { rejectUnauthorized: false }`（Bun の拡張）を渡す。以前は `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` をモジュール読み込み時に設定しており、Bun ではプロセス内のすべての `fetch`（`fetch` ツールのインターネット取得も）の証明書検証が止まっていた（2026-11-04 に実機で確認して修正）。
 - ヘッダ: `Authorization: Bearer ${OBSIDIAN_API_KEY}`、`Content-Type: text/markdown` を既定で付与し、`init.headers` で上書き可能。
 - URL は `` `${BASE_URL}${path}` `` の単純結合。**`makeRequest` 自体はパスのエンコードを一切行わない**。エンコードは呼び出し側（ツールごと）の責任になっている。
 - 失敗はすべて `ObsidianApiError`（`shared/describeApiError.ts`）で投げる。`description` に人間/LLM 向けの説明、`status` に HTTP ステータス。詳細は「ツールの失敗は `isError` 付きのツール結果として理由を返す」の節。
 - レスポンスは Content-Type が json なら `json()`、それ以外は `text()` で読み、arktype スキーマで検証。204 は `undefined`。スキーマ不一致も `ObsidianApiError` になり、どのエンドポイントの応答が想定外だったかを含む。
 - `OBSIDIAN_REQUEST_TIMEOUT_MS` を設定するとその ms で `AbortSignal.timeout` を張る。**既定は無制限**（Templater 実行や意味検索が長時間かかりうるため）。
 
-パスの組み立ては各ツールに書かれているが、vault 内パスはすべて `shared/encodeVaultPath.ts` を通す（理由は「vault パスはセグメント単位でエンコードする」の節）。現状の内訳：
+パスの組み立ては各ツールに書かれているが、vault 内パスはすべて `shared/encodeVaultPath.ts` を通す（理由は「vault パスはセグメント単位でエンコードする」の節）。`encodeVaultPath` はエンコードの前に `assertVaultPath` でパスを検査し、`..`・ドットで始まるフォルダ・`\` などを拒否する（「vault パスの `..` と隠しフォルダは拒否する」の節）。現状の内訳：
 
 | 組み立て方 | 該当箇所 |
 |---|---|
-| `encodeVaultPath` | `get_vault_file`, `create_vault_file`, `append_to_vault_file`, `patch_vault_file`, `delete_vault_file`（`/vault/${encodeVaultPath(args.filename)}`）、`show_file_in_obsidian`（`/open/...`）、`list_vault_files`（`/vault/<encoded>/`）、`features/templates`（`/vault/${encodeVaultPath(args.name)}`）、`features/prompts`（`/vault/${encodeVaultPath("Prompts/<file>")}`） |
-| 固定パス | `/active/` 系、`search_vault`（`/search/`）、`search_vault_smart`（`/search/smart`）、prompts の一覧（`/vault/Prompts/`） |
+| `encodeVaultPath` | `get_vault_file`, `create_vault_file`, `append_to_vault_file`, `patch_vault_file`, `delete_vault_file`（`/vault/${encodeVaultPath(args.filename)}`）、`show_file_in_obsidian`（`/open/...`）、`list_vault_files`（`/vault/<encoded>/`）、`features/templates`（`/vault/${encodeVaultPath(args.name)}`）、`features/prompts`（`/vault/${encodeVaultPath("Prompts/<file>")}`）、アクティブファイルへの書き込み 4 ツール（`GET /active/` で得たパスを `/vault/<encoded>` に。後述） |
+| 固定パス | `get_active_file`（`/active/`）、`search_vault`（`/search/`）、`search_vault_smart`（`/search/smart`）、prompts の一覧（`/vault/Prompts/`）、`/mcp-tools/protected-folders` |
 | クエリ文字列 | `search_vault_simple` は `URLSearchParams` |
 
 ### MCP ツール定義
@@ -68,6 +68,7 @@ Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `sha
 2. 新しいエンドポイントのレスポンス型が要るなら `packages/shared/src/types/plugin-local-rest-api.ts`。
 3. そのエンドポイントを本プラグインが提供するもの（`/search/smart`, `/templates/execute` の類）なら `packages/obsidian-plugin/src/main.ts` のルート登録とハンドラも。
 4. パスを URL に埋め込むなら後述の規約に従う。
+5. vault に書き込む（作成・変更・削除する）ツールは、送る前に `assertWritable(<vault パス>)`（`shared/writeGuard.ts`）を呼ぶ。アクティブファイルに書くなら `/active/` に送らず、`activeFilePath()` で得たパスを検査してから `/vault/<path>` に送る。
 
 ## 現行仕様とその理由（過去の不具合から）
 
@@ -158,14 +159,63 @@ Bun workspace のモノレポ（`packages/mcp-server` / `obsidian-plugin` / `sha
 
 ### コーディング規約: パスを URL に埋め込むときはセグメント単位でエンコードする
 
-vault 内パスを URL パスに埋め込む処理を書く・直すときは、必ず `/` で分割してから各セグメントを `encodeURIComponent` し、`/` で再結合する。パス全体に `encodeURIComponent` をかけてはならない（`/` が `%2F` になり Local REST API がファイルとして解決しない）。エンコードなしで埋め込むのも不可（スペース・`#`・`?`・`%` で壊れる）。`makeRequest` はエンコードしないので、呼び出し側でヘルパーを通す。
+vault 内パスを URL パスに埋め込む処理を書く・直すときは、必ず `/` で分割してから各セグメントを `encodeURIComponent` し、`/` で再結合する。パス全体に `encodeURIComponent` をかけてはならない（`/` が `%2F` になり Local REST API がファイルとして解決しない）。エンコードなしで埋め込むのも不可（スペース・`#`・`?`・`%` で壊れる）。`makeRequest` はエンコードしないので、呼び出し側でヘルパーを通す。ヘルパー（`encodeVaultPath`）はエンコードの前に `..`・隠しフォルダ・`\` を拒否するので、自前で `split("/").map(encodeURIComponent)` を書かずに必ずこれを使う。URL に載らないパス（`execute_template` の `targetPath` など）は `assertVaultPath` で同じ検査をかける。
+
+## セキュリティ上の前提と対策（2026-11-04 の監査から）
+
+脅威として想定するのは、LLM に届く文章によるプロンプトインジェクション。`fetch` で読んだ Web ページ、Web クリップや他人から受け取ったノート、意味検索で拾った節に「〜して」と書かれていれば、LLM はそれに従ってツールを呼びうる。Claude Desktop でツールを「常に許可」にしていると人が止める機会はない。以下はどれも、そうして呼ばれたツールが vault の外やコード実行に届かないようにするためのもの。監査時の実機（Local REST API 5.5.2、Templater 2.26.0）で、下の 1〜3 は修正前のコードで再現を確認した。
+
+### vault パスの `..` と隠しフォルダは拒否する
+
+症状: `encodeVaultPath` は `..` を素通しし、`fetch` が URL のドットセグメントを送信前に解決するので、`append_to_vault_file("../commands/app:reload")` は `POST /commands/app%3Areload`（Obsidian の任意のコマンド実行）として届いた。`delete_vault_file("../active/")` は `DELETE /active/`、prompts の `Prompts/../x.md` は `/vault/x.md` になった（`Bun.serve` のスタブで確認）。
+
+対応: `packages/shared/src/vaultPath.ts` の `vaultPathProblem()` が理由を返し、MCP サーバでは `encodeVaultPath` の中の `assertVaultPath` が `InvalidParams` で拒否する（何も送らない）。拒否するもの:
+
+- `.` / `..` のセグメント。
+- ドットで始まるセグメント（`.obsidian`、`.git`、`.claude` など）。Local REST API 5.5.2 は `.obsidian`（設定フォルダ）を既定で拒否するが（`ConfigDirAccessNotAllowed`、設定で解除できる）、それ以外の隠しフォルダは通す。自分の vault には `.git`（obsidian-git が使う。フックを書かれるとコミット時に実行される）と `.claude` / `.codex` / `.agents`（エージェントの設定・フック）がある。Obsidian は隠しフォルダを表示しないので、ノートがそこにあることはない。
+- `\`（Windows では区切り文字として扱われ、上の検査をすり抜ける）、`:`、制御文字、Windows の 8.3 短縮名に見える名前（`TEMPLA~1` は `Templates` を指しうる）。
+
+単体テストは `encodeVaultPath.test.ts` と `vaultPath.test.ts`。
+
+### Templater が実行するフォルダは MCP から書き込めない
+
+症状: `execute_template` の `name` には vault 内の任意のファイルを渡せた。`create_vault_file` で `<%* ... %>` を書いたノートを作り、それを `execute_template` に渡せば、Templater がその JS を Obsidian（Electron）の中でプラグインと同じ権限で実行する（`<% %>` の式も JS として評価される）。テンプレートを書き換えておけば、ユーザーが次にそれを使ったときにも実行される。
+
+対応（2 段構え）:
+
+- プラグイン（`main.ts` の `handleTemplateExecution`、判定は `features/templates/policy.ts`）: 実行するのは Templater のテンプレートフォルダ（`templates_folder`）か `Prompts/` の中のファイルだけ。それ以外は 403 と理由。`createFile` の `targetPath` も検査し、`..`・隠しフォルダ・保護フォルダへの保存は 403。テンプレートフォルダが未設定かルートなら `Prompts/` だけを実行する。Templater の `functions_generator.generate_object` の差し替えは `finally` で必ず戻し、実行は 1 本ずつ直列にする（以前は例外で差し替えが残り、並行実行で引数が混ざりえた）。
+- MCP サーバ（`shared/writeGuard.ts`）: 書き込み系ツール（`create_vault_file` / `append_to_vault_file` / `patch_vault_file` / `delete_vault_file`、アクティブファイル版の 4 つ、`execute_template` の `targetPath`）は、プラグインの `GET /mcp-tools/protected-folders` が返すフォルダ（テンプレート、Templater のユーザースクリプト、`Prompts`）の中なら拒否する。一覧は 30 秒キャッシュする。比較は大文字小文字・NFC・末尾の `.` と空白を無視する（Windows ではどれも同じフォルダになる）。ルートが 404（プラグインが無効・古い）なら**書き込まない**（fail closed）。アクティブファイルに書く 4 ツールは `GET /active/`（note+json）でパスを得て検査し、`/active/` ではなく `/vault/<path>` に送る（検査と書き込みの間に開いているファイルが変わっても、検査したファイルにしか書かない）。成功時の応答にそのパスを含める。
+- MCP サーバとプラグインは同じコミットからビルドして配置すること。新しいサーバと古いプラグインの組み合わせでは、書き込みがすべて 404 で拒否される。
+- 残る穴: Templater の `tp.file.include` で保護フォルダの外のノートを読み込むテンプレートは、そのノートの中身も実行する。Templater の「Trigger Templater on new file creation」を有効にすると、新しく作られたファイルの中のコマンドが実行されるので、MCP で作ったノートでも動く。自分の vault では無効（既定のまま）。有効にしないこと。
+
+単体テストは `features/templates/policy.test.ts`（プラグイン）と `writeGuard.test.ts`（サーバ）。
+
+### `fetch` ツールは公開 Web の http(s) だけを読む
+
+症状: URL の検査がなく、Bun の `fetch` は `file://` を読むので、`file:///C:/Users/<you>/AppData/Roaming/Claude/claude_desktop_config.json`（API キー）などローカルファイルを LLM が読めた（実機で確認）。`http://127.0.0.1:27123/` や LAN の機器にも届いた。応答の大きさにも上限がなかった。
+
+対応: `features/fetch/safeFetch.ts` の `fetchPage()`。`http:` / `https:` 以外は拒否。ホストを DNS で引き、ループバック・プライベート・リンクローカル（169.254.169.254 を含む）・CGNAT・マルチキャスト・予約済み、IPv6 に埋め込まれた IPv4（`::ffff:127.0.0.1`、NAT64、6to4）のどれかに当たれば拒否。リダイレクトは `redirect: "manual"` で 1 ホップずつ同じ検査をかけ、最大 5 回。本文は 5 MB で打ち切り（`truncated` を付けて先頭だけ返す）、全体で 30 秒のタイムアウト。LAN のページを読みたいときは MCP サーバの env に `OBSIDIAN_MCP_FETCH_ALLOW_PRIVATE=true`。検査と接続で DNS を別々に引くので、その間に答えが変わる DNS rebinding は防げない。単体テストは `safeFetch.test.ts`（`Bun.serve` で実際にリダイレクトや大きな応答を返す）。
+
+### ログにノートの中身を書かない
+
+症状: `features/core/index.ts` が全ツール呼び出しの引数と応答を `debug` で記録していた。ログレベルは `NODE_ENV === "production"` のときだけ INFO だったが、`build:windows` も Claude Desktop も `NODE_ENV` を設定しないので、配布バイナリは常に DEBUG だった。監査時、ログは 13.7 MB、応答 2,628 件分（2025-06-09 以降）のノート本文を平文で含んでいた（API キーは 0 件）。
+
+対応: `shared/logger.ts` の既定を INFO にし、`OBSIDIAN_MCP_LOG_LEVEL`（`DEBUG` / `INFO` / `WARN` / `ERROR` / `FATAL`）で変えられるようにした。DEBUG でもツール名・所要時間・`isError` だけを記録する。`ToolRegistry.dispatch` の失敗ログは引数の値ではなく引数名だけ、`makeRequest` のスキーマ不一致のログは応答本文を含めない。`parseTemplateParameters` はタグのコードを記録しない。既存のログファイルは自動では消えないので、手で削除する。
+
+### 依存の取得と CI
+
+- プラグインの「Install Server」/「Update」は削除した（「2 つのコンポーネントと通信経路」の 1）。
+- `status.ts` の `--version` 実行は `execFile`（シェルを通さない）に、`openFolder.ts` は Electron の `shell.openPath` にした。以前は `exec` にパスを文字列で埋め込んでおり、cmd は引用符の中でも `%VAR%` を展開し、macOS/Linux の sh は `$(...)` を実行する。
+- 意味検索の OpenAI 互換 Base URL が他のマシンへの平文 http なら、設定画面に警告を出す（`settings.ts` の `isInsecureRemoteUrl`。localhost / 127.x / ::1 は対象外）。
+- CI と release の action はコミット SHA で固定し、`actions/checkout` は `persist-credentials: false`。Bun は `1.4.4` に固定（「CI」の節）。
+- バイナリは vault の `.obsidian/plugins/mcp-tools/bin/` に置く。自分の vault は git 管理だが `.gitignore` が `.obsidian/` を除外しているので、同期経由で差し替えられることはない。`.obsidian/` を同期対象に入れる場合は `bin/` を外すこと。
 
 ## 開発フロー
 
 ### 前提ツール
 
 - ランタイム/バンドラは Bun のみ（`mise.toml`: `bun = "latest"`、README は v1.1.42 以上）。Node は使わない。
-- このマシンの bun は 1.4.0（2026-10-27 確認。CI は `latest` で、同日は 1.4.4）。`bun.lock` の GitHub 依存 3 件の integrity ハッシュはすでに lock に入っていて、`bun install` で中身の差分は出ない（以前は 1.4 が毎回追記していた）。`git status` に `bun.lock` が出ても改行コードの違いだけのことがあり、そのときは `git checkout -- bun.lock` で戻す。
+- このマシンの bun は 1.4.0（2026-10-27 確認）。CI と release は 2026-11-04 から `1.4.4` に固定（それまでは `latest`）。`bun.lock` の GitHub 依存 3 件の integrity ハッシュはすでに lock に入っていて、`bun install` で中身の差分は出ない（以前は 1.4 が毎回追記していた）。`git status` に `bun.lock` が出ても改行コードの違いだけのことがあり、そのときは `git checkout -- bun.lock` で戻す。
 - `.claude/worktrees/` 下の worktree には `node_modules` が無く、そのままだと `shared` がリポジトリ本体の `node_modules/shared`（本体の `packages/shared` への junction）に解決される。worktree で `packages/shared` を変えても `bun run check` / `bun test` / ビルドは本体の古い `shared` を見て通ってしまう。worktree ではまず `bun install` し（`bun.lock` の差分は `git checkout -- bun.lock` で戻す）、`node_modules/shared` が worktree 側を指すことを確かめる。
 - Windows で `link` スクリプトを使う場合、`symlinkSync(..., "dir")` はシンボリックリンク作成権限が要る。権限がなければ後述のコピー方式にする。
 
@@ -182,11 +232,10 @@ bun install
 Obsidian プラグイン（`packages/obsidian-plugin`）:
 
 ```bash
-cd packages/obsidian-plugin && GITHUB_DOWNLOAD_URL="https://github.com/jacksteamdev/obsidian-mcp-tools/releases/download/0.2.33" GITHUB_REF_NAME="0.2.33" bun run build
+cd packages/obsidian-plugin && bun run build
 ```
 
-`build` = `bun run check && bun bun.config.ts --prod`。型チェック後、リポジトリ直下に `main.js` が出る。`dev` は watch。
-**環境変数 2 つは必須**（確認済み）: `constants/bundle-time.ts` のマクロはビルド時に `process.env.GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` を読む。`bun.config.ts` の `define` はバンドル対象のソースにしか効かず、マクロ実行時には見えないので、変数なしで実行すると `Failed to get environment variables` → `cannot coerce Exception ... to Bun's AST` で落ちる。`release.yml` も同じ 2 変数を明示的に渡している。値はルート `package.json` の `version` に合わせる（`GITHUB_REF_NAME` は semver として `clean` される）。`GITHUB_DOWNLOAD_URL` は「Install Server」ボタンの取得先に埋め込まれるだけなので、fork でボタンを使わない限り値の中身は動作に影響しない。PowerShell なら `$env:GITHUB_DOWNLOAD_URL="..."; $env:GITHUB_REF_NAME="0.2.33"; bun run build`。
+`build` = `bun run check && bun bun.config.ts --prod`。型チェック後、リポジトリ直下に `main.js` が出る。`dev` は watch。以前必須だった環境変数 `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` は、ダウンロード機能と一緒に 2026-11-04 に不要になった。`bun.config.ts` の Svelte の `dev` フラグが逆（`dev: isProd`）で本番ビルドが開発モードになっていたのも同日に直した（`main.js` は約 0.47 MB）。
 
 MCP サーバ（`packages/mcp-server`）:
 
@@ -202,19 +251,19 @@ cd packages/mcp-server && bun run build:windows
 cd packages/mcp-server && bun test
 ```
 
-テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`）と `packages/obsidian-plugin`（`src/features/semantic-search/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。obsidian-plugin の `tsconfig.json` は 2026-10-27 まで `include` が `src/*.ts`（サブディレクトリを含まない）で、`.svelte` からしか読まれない `.ts`（`openFolder.ts`、`confirmIndexing.ts`）とテストが型チェックから漏れていた。`src/**/*.ts` に広げ、そのとき出たテストの型エラー 2 件を直した。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
+テストは `packages/mcp-server`（`src/shared/*.test.ts` と `src/features/**/*.test.ts`。`packages/shared` のテストもここに置く）と `packages/obsidian-plugin`（`src/features/**/*.test.ts`、`cd packages/obsidian-plugin && bun test src`）にある。単一ファイルは `bun test src/shared/parseTemplateParameters.test.ts`。型チェックはルートで `bun run check`（全パッケージの `tsc --noEmit`）。obsidian-plugin の `tsconfig.json` は 2026-10-27 まで `include` が `src/*.ts`（サブディレクトリを含まない）で、`.svelte` からしか読まれない `.ts`（`openFolder.ts`、`confirmIndexing.ts`）とテストが型チェックから漏れていた。`src/**/*.ts` に広げ、そのとき出たテストの型エラー 2 件を直した。`makeRequest.test.ts` は `Bun.serve` でスタブ API を立て `OBSIDIAN_PORT` でそこへ向けるので、Obsidian が起動していなくても動く。
 
-現状 mcp-server は 119 件（14 ファイル）、obsidian-plugin は 99 件（12 ファイル）がすべて通る（2026-10-27 確認。MCP SDK 1.32.2 / arktype 2.2.9）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
+現状 mcp-server は 184 件（18 ファイル）、obsidian-plugin は 111 件（13 ファイル）がすべて通る（2026-11-04 確認。MCP SDK 1.32.2 / arktype 2.2.9）。以前は `parseTemplateParameters.test.ts` の 4 件が失敗していた。原因は 2 つ: (1) テストが古い関数名 `tp.user.promptArg(...)` のままで、実装と `main.ts` が Templater に注入する `tp.mcpTools.prompt(...)` に合っていなかった（テストを直した）。(2) `parseTemplateParameters.ts` の `TEMPLATER_END_TAG` が `g` フラグ付きで、ループ内の `.test()` が `lastIndex` を持ち越すため、1 つのノートに複数の Templater タグがあると 2 つ目以降の `tp.mcpTools.prompt` が拾われなかった（実装のバグ。`g` を外した）。
 
 ### CI（`.github/workflows/ci.yml`）
 
-`main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `latest`。3 ジョブ：
+`main` への push、PR、手動実行（`workflow_dispatch`）で走る。`.md` と `docs/` だけの変更では走らない。Bun は `release.yml` と同じく `1.4.4` に固定。action はタグではなくコミット SHA で固定し（タグは付け替えられるため。行末のコメントが版）、Dependabot が SHA ごと更新する。`actions/checkout` は `persist-credentials: false`（後続のステップに `GITHUB_TOKEN` を残さない）。3 ジョブ：
 
 - `audit`（ubuntu）: `bun audit` を回し、1 件でもあれば `::error::` を出して失敗する（2026-10-27 に報告だけから切り替えた）。全文はジョブの Summary に出る。新しい advisory で落ちても型チェックやテストの結果が見えるよう、別ジョブにしてある。`bun audit` は `bun.lock` だけを読むので `bun install` はしない。advisory は時間とともに増えるので、コードを変えていない PR（Dependabot など）でもこのジョブだけ落ちることがある。
 - `linux`（ubuntu）: `bun install --frozen-lockfile` → `bun run check` → `bun run lint` → 両パッケージの `bun test` → プラグインのビルド → `build:linux` して `--version` がルート `package.json` の版と一致するか確認。
 - `windows`: 両パッケージの `bun test` → プラグインのビルド → `build:windows` して `--version` を確認 → `main.js` / `manifest.json` / `packages/mcp-server/dist/mcp-server-windows.exe` を artifact `mcp-tools-windows-<sha>`（14 日保持）に上げる。vault へ手で置くときはここから取ってよい（exe は `bin/mcp-server.exe` にリネーム）。
 
-プラグインのビルドに要る `GITHUB_DOWNLOAD_URL` / `GITHUB_REF_NAME` はステップ内でルート `package.json` の版から組む。Actions は `GITHUB_REF_NAME` に `main` や `<PR番号>/merge` を自動で入れるので、上書きしないとマクロの semver `clean()` が `null` を返し、版の代わりに `null` が埋め込まれる。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
+`release.yml`（タグの push で走る）は、型チェックと両パッケージのテストが通ってから `bun run release`（全プラットフォームのバイナリ、プラグインの `main.js` と zip）→ Linux バイナリの `--version` がタグと一致するか確認 → attestation → `softprops/action-gh-release` で Release を作って成果物を上げる。以前は最初に空の Release を作り、テストなしでビルドし、本文の取得と再アップロードに `actions/github-script` と `ncipollo/release-action` も使っていた（書き込み権限を持つサードパーティ action を 1 つに減らした）。mcp-server のテストは `bun run test`（シェルの `**` 展開に依存）ではなく `bun test` を直接呼ぶ。`verify:paths` / `verify:semantic` は実機の Obsidian と API キーが要るので CI では回さない。
 
 ### 依存と脆弱性
 
@@ -240,12 +289,12 @@ cd packages/mcp-server && bun test
 - symlink: `cd packages/obsidian-plugin && bun run link <vault>/.obsidian`（`scripts/link.ts`。リポジトリ直下を `<vault>/.obsidian/plugins/mcp-tools` としてリンクする。以後は `bun run build` するだけで反映）
 - コピー: リポジトリ直下の `main.js` と `manifest.json` を `<vault>/.obsidian/plugins/mcp-tools/` に置く。
 
-`styles.css` は `scripts/zip.ts` と `release.yml` から参照されているがリポジトリに存在しない。プラグインの動作には不要。`bun run zip` が失敗するかは未確認。
+`styles.css` はリポジトリに存在せず、プラグインの動作にも不要。`scripts/zip.ts` は以前 `packages/obsidian-plugin/` 直下の `main.js` と存在しない `styles.css` を探していたので、2026-11-04 にリポジトリ直下の `main.js` / `manifest.json` を入れ、`styles.css` はあれば入れるように直した（`bun run zip` で確認）。
 
-MCP サーバは「Install Server」ボタンを使わず（上流リリースを取りに行くため）、自前ビルドを手で配置する：
+MCP サーバは自前ビルドを手で配置する（設定画面のダウンロード機能は削除済み）：
 
 1. `dist/mcp-server-windows.exe` を `<vault>/.obsidian/plugins/mcp-tools/bin/mcp-server.exe` にコピー（`status.ts` の `getInstallPath()` がこの場所を見て、`--version` の出力と `manifest.version` を比較する）。
-2. `%APPDATA%\Claude\claude_desktop_config.json` に以下を書く（`services/config.ts` が書くものと同形式）：
+2. 設定画面の「Register in Claude Desktop」を押す（バイナリが見つかっているときだけ出る）か、`%APPDATA%\Claude\claude_desktop_config.json` に以下を手で書く（`services/config.ts` が書くものと同形式）：
 
 ```json
 {
@@ -273,7 +322,7 @@ cd packages/mcp-server && OBSIDIAN_API_KEY=<key> bun run inspector
 
 Claude Code のこのプロジェクトに `obsidian-mcp-tools` MCP サーバが接続されている場合は、`mcp__obsidian-mcp-tools__get_vault_file` 等を直接呼んで検証できる。ただしそれは Claude Desktop 設定に書かれた（= 現在配置済みの）バイナリの動作であり、ビルドし直したら再起動するまで反映されない。
 
-ログ（`packages/shared/src/logger.ts` の `getLogFilePath`）: Windows では `%USERPROFILE%\AppData\Local\Logs\Claude\mcp-server-obsidian-mcp-tools.log`。プラグイン側は本番ビルドでは `console` に出し、開発ビルドのときだけ同ディレクトリの `obsidian-plugin-mcp-tools.log` に書く。`constants/index.ts` の `LOG_PATH`（`%APPDATA%\obsidian-mcp-tools\logs`）は UI 表示用の値で、実際の書き込み先と一致していない。
+ログ（`packages/shared/src/logger.ts` の `getLogFilePath`）: Windows では `%USERPROFILE%\AppData\Local\Logs\Claude\mcp-server-obsidian-mcp-tools.log`。既定は INFO で、調べるときは Claude Desktop 設定の `env` に `"OBSIDIAN_MCP_LOG_LEVEL": "DEBUG"` を足す。DEBUG でもツール名・所要時間・成否だけでノートの中身は書かない（「ログにノートの中身を書かない」の節）。プラグイン側は本番ビルドでは `console` に出し、開発ビルドのときだけ同ディレクトリの `obsidian-plugin-mcp-tools.log` に書く。`constants/index.ts` の `LOG_PATH`（`%APPDATA%\obsidian-mcp-tools\logs`）は UI 表示用の値で、実際の書き込み先と一致していない。
 
 ## 検証用の vault パス条件
 
@@ -295,15 +344,15 @@ vault 内パスを扱うツール（`get_vault_file` / `create_vault_file` / `ap
 cd packages/mcp-server && bun run build:windows && bun run verify:paths
 ```
 
-`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-10-27 時点で 179/179 PASS（MCP SDK 1.32.2 / arktype 2.2.9 のバイナリ）。
+`scripts/verify-paths.ts` は `dist/mcp-server-windows.exe` を Claude Desktop と同じ stdio で起動し（引数で別バイナリを指定可）、API キーと vault の場所を `%APPDATA%\Claude\claude_desktop_config.json` から読む（キーは出力しない）。各パターンで get / create / append / patch（ASCII 見出し・日本語見出し・配列 target・frontmatter・`delete`）/ `show_file_in_obsidian` → `patch_active_file` / frontmatter にリスト・数値・真偽値を入れて `get_vault_file` と `get_active_file` の `format: "json"` / list（末尾 `/` あり・なし）/ delete を回す。vault の `_mcp-tools-test/` 以下とルートの `_mcp-tools-test-root.md` に書いて消し、残った空ディレクトリはディスク上で直接削除する。`show_file_in_obsidian` を使うので Obsidian にテストファイルのタブが 6 つ開いたまま残る（ファイル自体は削除済み）。Obsidian と Local REST API が起動していること。結果は Markdown の表で出る。第 1 フェーズのあと、`_mcp-tools-test/日記/_patch_headings.md` で H2 以下の見出し解決を回す第 2 フェーズ（前節）、さらに失敗メッセージを確かめる第 3 フェーズが続く。第 3 フェーズは原因が設定側なので**ケースごとにサーバプロセスを起動し直す**（`callWithEnv`）: 誤った API キー → `Authentication failed`、閉じているポート（`OBSIDIAN_PORT=27199`） → `Cannot reach Obsidian Local REST API`、存在しないパス → `File not found: <パス>`、未知のツール → JSON-RPC エラーのまま。どのケースでも実際の API キーが出力に含まれないことを検査する。2026-10-27 時点で 179/179 PASS（MCP SDK 1.32.2 / arktype 2.2.9 のバイナリ）。2026-11-04 に第 4 フェーズ（安全策）を足した: `..` で別エンドポイントに届かない、`.obsidian` を読めない、`Prompts/` に書けない、テンプレートフォルダ外のノートを `execute_template` で実行できない、`Prompts/` のテンプレートは引数付きで実行でき、その出力を `Prompts/` には保存できない、`fetch` で `file://` を読めない。`Prompts/` のテンプレートは MCP から書けないので、スクリプトがディスクに直接置き（Obsidian が索引するまで最大 10 秒待つ）、終わったら消す。`Prompts/` が元から無ければフォルダも消す。同じコミットのプラグインを配置してから回すこと（古いプラグインには `/mcp-tools/protected-folders` が無く、書き込みが全部拒否される）。2026-11-04 時点で 190/190 PASS（Local REST API 5.5.2、Obsidian 1.15.0、Templater 2.26.0）。
 
-意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-06 時点で 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
+意味検索は `cd packages/mcp-server && bun run build:windows && bun run verify:semantic` で確かめる。索引が作成済み（設定画面で `ready`）であること。上の 5 パターンに固有の話題のノートを作り、差分更新を待ってから言い換えた検索語で当たるか、`folders` / `excludeFolders` の絞り込み、`limit` の範囲外が `isError` になるか、更新・削除が結果に反映されるかを回す。長い節（約 2,100 字）が既定の 300 字で切れ、`maxTextChars` の 100 / 0 / 5000 / 範囲外が期待どおりかも確かめる（設定の "Max characters per search result" が 300 であること）。2026-10-06 時点で 48/48 PASS、2026-11-04（セキュリティ修正後のバイナリとプラグイン）も 48/48 PASS。`_mcp-tools-test/` を除外フォルダに入れていると全部失敗する。
 
 ## バージョン整合
 
 | ファイル | 役割 |
 |---|---|
-| `package.json`（ルート） | 唯一の入力。`version` を `bun.config.ts`（`GITHUB_DOWNLOAD_URL` の埋め込み）、`packages/mcp-server/src/features/version/index.ts`（`--version` の出力）、`scripts/zip.ts`（zip 名）が読む |
+| `package.json`（ルート） | 唯一の入力。`version` を `packages/mcp-server/src/features/version/index.ts`（`--version` の出力）と `scripts/zip.ts`（zip 名）が読む |
 | `manifest.json`（ルート） | Obsidian が読む。`version` は package.json と同値に保つ。`minAppVersion` は `1.11.4`（意味検索の API キーを `SecretStorage` に置くため） |
 | `versions.json`（ルート） | `{ "<plugin version>": "<minAppVersion>" }` の対応表。Obsidian のプラグイン更新判定用 |
 
