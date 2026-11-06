@@ -32,7 +32,7 @@
 		"svelte-preprocess": "^6.0.5"
 	},
 	"devDependencies": {
-		"@types/express": "^4.17.25",
+		"@types/express": "^5.0.6",
 		"@types/node": "^26.6.6",
 		"@types/semver": "^7.8.0",
 		"archiver": "^8.0.0",
