@@ -1,4 +1,4 @@
-import { create } from "archiver";
+import { ZipArchive } from "archiver";
 import { createWriteStream, existsSync } from "fs";
 import fs from "fs-extra";
 import { join, resolve } from "path";
@@ -15,7 +15,7 @@ async function zipPlugin() {
   const zipFilePath = join(releaseDir, `obsidian-plugin-${version}.zip`);
   const output = createWriteStream(zipFilePath);
 
-  const archive = create("zip", { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on("warning", (error) => {
     throw error;
   });
