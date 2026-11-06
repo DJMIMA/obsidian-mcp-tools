@@ -12,7 +12,7 @@ import {
   timer,
 } from "rxjs";
 import type { Templater } from "shared";
-import type McpToolsPlugin from "src/main";
+import type McpToolsPlugin from "$/main";
 
 export interface Dependency<ID extends keyof App["plugins"]["plugins"], API> {
   id: keyof Dependencies;

@@ -15,6 +15,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Local REST API は実行時に Express 4 で動き、npm パッケージ obsidian-local-rest-api の
+      # peer も @types/express ^4。5 の型にするとルートのハンドラの型が合わなくなる（PR #14）。
+      # obsidian-local-rest-api の peer が ^5 になったら外す。
+      - dependency-name: "@types/express"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"
 

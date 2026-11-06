@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { FeatureSettings as McpServerInstallSettings } from "src/features/mcp-server-install";
-  import { SemanticSearchSettingsView } from "src/features/semantic-search";
-  import type McpServerPlugin from "src/main";
+  import { FeatureSettings as McpServerInstallSettings } from "$/features/mcp-server-install";
+  import { SemanticSearchSettingsView } from "$/features/semantic-search";
+  import type McpServerPlugin from "$/main";
 
   export let plugin: McpServerPlugin;
 </script>
