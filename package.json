@@ -24,7 +24,7 @@
     "zip": "bun --filter '*' zip"
   },
   "devDependencies": {
-    "eslint": "^9.39.5",
+    "eslint": "^10.14.0",
     "npm-run-all2": "^9.0.4",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.72.1"
