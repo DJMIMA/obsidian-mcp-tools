@@ -22,7 +22,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "acorn": "^8.19.0",
     "acorn-walk": "^8.3.5",
-    "arktype": "2.2.9",
+    "arktype": "2.2.10",
     "radash": "^12.1.1",
     "shared": "workspace:*",
     "turndown": "^7.2.5"
