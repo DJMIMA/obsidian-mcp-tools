@@ -9,7 +9,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "arktype": "^2.2.9"
+    "arktype": "^2.2.10"
   },
   "devDependencies": {
     "@types/bun": "latest",
